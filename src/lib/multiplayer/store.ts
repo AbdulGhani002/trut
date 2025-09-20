@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { Socket, io } from 'socket.io-client';
-import type { GameRoom, TrutGameState, MatchmakingRequest } from '../../../shared/types/game';
+import type { GameRoom, TrutGameState, MatchmakingRequest, Card } from '../../../shared/types/game';
 import type { ChatMessage } from '../../../shared/types/socket';
 
 export interface ConnectionStatus {
@@ -12,7 +12,6 @@ export interface ConnectionStatus {
 }
 
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:4001';
-
 interface MultiplayerStore {
   socket: Socket | null;
   connectionStatus: ConnectionStatus;
@@ -35,6 +34,8 @@ interface MultiplayerStore {
   sendChatMessage: (message: string) => void;
   playCard: (cardId: string) => void;
   callTrut: () => void;
+  callBrelan: (cards: Card[]) => void;
+  startFortialPhase: () => void;
   respondToChallenge: (accept: boolean) => void;
   setPlayerName: (name: string) => void;
 }
@@ -45,6 +46,7 @@ interface SocketEventData {
   matchmakingStatus: { 
     status?: string; 
     estimatedWaitTime?: number | null; 
+    playersInQueue?: number;
   };
   gameStart: { room?: GameRoom; gameState?: TrutGameState };
   cardPlayed: { gameState?: TrutGameState };
@@ -52,15 +54,32 @@ interface SocketEventData {
     playerId: string; 
     gameState?: TrutGameState; 
   };
+  brellanCalled: {
+    playerId: string;
+    cards: Card[];
+    gameState?: TrutGameState;
+  };
   challengeResponse: { 
+    playerId: string;
     accept: boolean; 
     gameState?: TrutGameState; 
+  };
+  rottenTrick: {
+    trickCards: Card[];
+    gameState?: TrutGameState;
+  };
+  fortialPhase: {
+    playerId: string;
+    gameState?: TrutGameState;
   };
   newRound: { 
     gameState?: TrutGameState; 
     scores?: TrutGameState['scores']; 
   };
-  gameEnded: { gameState?: TrutGameState };
+  gameEnded: { 
+    gameState?: TrutGameState;
+    prizeDistribution?: { [playerId: string]: number };
+  };
 }
 
 const initialConnectionStatus: ConnectionStatus = {
@@ -98,11 +117,12 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
     });
 
     socket.on('matchFound', (data: SocketEventData['matchFound']) => {
+      console.log('Match found event received:', data);
       set({ currentRoom: data.room, matchmakingStatus: 'found', estimatedWaitTime: null });
     });
     socket.on('matchmakingStatus', (data: SocketEventData['matchmakingStatus']) => {
-      console.log('Matchmaking status:', data);
-      set({ 
+      console.log('Matchmaking status update:', data);
+      set({
         matchmakingStatus: data.status as 'searching' || 'searching',
         estimatedWaitTime: data.estimatedWaitTime || null
       });
@@ -111,7 +131,7 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
       set({ matchmakingStatus: 'cancelled', estimatedWaitTime: null });
     });
     socket.on('gameStart', (data: SocketEventData['gameStart']) => {
-      set({ currentRoom: data.room || get().currentRoom, gameState: data.gameState || null });
+      set({ currentRoom: data.room || get().currentRoom, gameState: data.gameState || null, matchmakingStatus: 'idle', estimatedWaitTime: null });
     });
     socket.on('cardPlayed', (data: SocketEventData['cardPlayed']) => {
       // Immediate update for responsive gameplay
@@ -153,6 +173,16 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
       console.log('Setting new game state with hands:', newGameState.hands);
       set({ gameState: newGameState });
     });
+    // Add new 2v2 event handlers
+    socket.on('brellanCalled', (data: SocketEventData['brellanCalled']) => {
+      set({ gameState: data.gameState || get().gameState });
+    });
+    socket.on('rottenTrick', (data: SocketEventData['rottenTrick']) => {
+      set({ gameState: data.gameState || get().gameState });
+    });
+    socket.on('fortialPhase', (data: SocketEventData['fortialPhase']) => {
+      set({ gameState: data.gameState || get().gameState });
+    });
     socket.on('gameEnded', (data: SocketEventData['gameEnded']) => {
       set({ gameState: data.gameState || null });
     });
@@ -174,10 +204,21 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
 
   startMatchmaking: (request) => {
     const { socket } = get();
-    if (!socket) return;
+    if (!socket) {
+      console.log('Cannot start matchmaking: no socket connection');
+      return;
+    }
     const name = get().playerName || 'Guest';
+    console.log('Starting matchmaking with request:', request);
     set({ matchmakingStatus: 'searching', estimatedWaitTime: null });
-    socket.emit('startMatchmaking', { gameMode: request.gameMode, playerName: name });
+    socket.emit('startMatchmaking', {
+      gameMode: request.gameMode,
+      playerName: name,
+      betAmount: request.betAmount,
+      teamMode: request.teamMode,
+      teamMateId: request.teamMateId
+    });
+    console.log('Matchmaking start event emitted');
   },
 
   cancelMatchmaking: () => {
@@ -233,6 +274,18 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
     const { socket } = get();
     if (!socket) return;
     socket.emit('respondToChallenge', accept);
+  },
+
+  callBrelan: (cards) => {
+    const { socket } = get();
+    if (!socket) return;
+    socket.emit('callBrelan', cards);
+  },
+
+  startFortialPhase: () => {
+    const { socket } = get();
+    if (!socket) return;
+    socket.emit('startFortialPhase');
   },
 
   setPlayerName: (name: string) => {

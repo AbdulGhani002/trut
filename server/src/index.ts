@@ -37,20 +37,121 @@ io.on('connection', (socket) => {
   console.log(`Player connected: ${socket.id}`);
 
   socket.on('startMatchmaking', (data) => {
-    const { gameMode, playerName } = data || {};
+    const { gameMode, playerName, betAmount, teamMode, teamMateId } = data || {};
     const playerId = socket.id;
-    gameManager.addToMatchmakingQueue(playerId, gameMode || '1v1', playerName || 'Player');
-    const match = gameManager.findMatch(gameMode || '1v1');
-    if (match && match.length === 2) {
-      const [player1, player2] = match;
-      const room = gameManager.createRoom(player1.playerId, player1.playerName || 'Player 1', gameMode || '1v1', 2);
-      const joinResult = gameManager.joinRoom(room.id, player2.playerId, player2.playerName || 'Player 2');
-      if (joinResult.success && joinResult.data) {
-        const s1 = io.sockets.sockets.get(player1.playerId);
-        const s2 = io.sockets.sockets.get(player2.playerId);
-        if (s1 && s2) {
-          s1.join(room.id); s2.join(room.id);
-          io.to(room.id).emit('matchFound', { room: joinResult.data, message: 'Match found! Game starting soon...' });
+
+    console.log(`Player ${playerId} starting matchmaking for ${gameMode} (bet: ${betAmount}, mode: ${teamMode})`);
+
+    // Add to queue with 2v2 support
+    try {
+      gameManager.addToMatchmakingQueue(
+        playerId,
+        gameMode || '1v1',
+        playerName || 'Player',
+        betAmount,
+        teamMode,
+        teamMateId
+      );
+    } catch (err: any) {
+      socket.emit('error', { message: err?.message || 'Invalid matchmaking request' });
+      return;
+    }
+
+    // For 2v2, check for matches periodically instead of immediately
+    // This gives all players time to join the queue
+    if (gameMode === '2v2') {
+      console.log(`2v2 matchmaking started for player ${playerId}, checking for matches...`);
+      const queueStatus = gameManager.get2v2QueueStatus(300);
+      socket.emit('matchmakingStatus', {
+        status: 'searching',
+        message: `Looking for ${teamMode === 'solo' ? 'players' : 'team opponents'}...`,
+        estimatedWaitTime: queueStatus.estimatedWaitTime,
+        playersInQueue: queueStatus.playersInQueue
+      });
+
+      // Trigger a match check immediately for 2v2 to speed up matchmaking
+      const matches = gameManager.processAllMatchmaking();
+      if (matches.length > 0) {
+        console.log(`Found ${matches.length} matches during immediate check`);
+        matches.forEach(({ gameMode: gm, room, betAmount }) => {
+          console.log(`(Immediate) Creating game for ${gm} in room ${room.id} with ${room.players.length} players`);
+          // Join all matched players to socket room
+          room.players.forEach(player => {
+            const playerSocket = io.sockets.sockets.get(player.id);
+            if (playerSocket) {
+              playerSocket.join(room.id);
+              console.log(`(Immediate) Player ${player.id} joined room ${room.id}`);
+            } else {
+              console.log(`(Immediate) Warning: Player ${player.id} socket not found for room join`);
+            }
+          });
+
+          io.to(room.id).emit('matchFound', {
+            room,
+            message: `${gm === '2v2' ? '2v2' : '1v1'} match found! Get ready to play!`
+          });
+
+          setTimeout(() => {
+            console.log(`(Immediate) Starting game in room ${room.id}`);
+            const startResult = gameManager.startGame(room.id);
+            if (startResult.success) {
+              const startedRoom = gameManager.getRoom(room.id)!;
+              console.log(`(Immediate) Game started successfully in room ${room.id}, sending to ${startedRoom.players.length} players`);
+              startedRoom.players.forEach((p) => {
+                const ps = io.sockets.sockets.get(p.id);
+                if (ps && startedRoom.gameState) {
+                  const sanitized = {
+                    ...startedRoom,
+                    gameState: {
+                      ...startedRoom.gameState,
+                      hands: {
+                        [p.id]: startedRoom.gameState.hands[p.id],
+                        ...Object.fromEntries(
+                          startedRoom.players
+                            .filter(x => x.id !== p.id)
+                            .map(x => [x.id, startedRoom.gameState!.hands[x.id].length])
+                        )
+                      }
+                    }
+                  } as any;
+                  ps.emit('gameStart', {
+                    room: sanitized,
+                    gameState: sanitized.gameState,
+                    message: 'Game started! Good luck!'
+                  });
+                  console.log(`(Immediate) Sent gameStart to player ${p.name} (${p.id})`);
+                } else {
+                  console.log(`(Immediate) Warning: Could not send gameStart to player ${p.id} (socket: ${!!ps}, gameState: ${!!startedRoom.gameState})`);
+                }
+              });
+            } else {
+              console.log(`(Immediate) Failed to start game in room ${room.id}: ${startResult.error}`);
+            }
+          }, 500);
+        });
+      }
+    } else {
+      // 1v1 immediate match check (existing logic)
+      const match = gameManager.findMatch(gameMode || '1v1', betAmount);
+      if (match && match.length >= 2) {
+        console.log(`1v1 match found immediately for player ${playerId}`);
+        const matchResult = gameManager.createMatchFromQueue(match, betAmount);
+        if (matchResult.success && matchResult.data) {
+          const room = matchResult.data;
+
+          // Join all matched players to socket room
+          match.forEach(player => {
+            const playerSocket = io.sockets.sockets.get(player.playerId);
+            if (playerSocket) {
+              playerSocket.join(room.id);
+            }
+          });
+
+          io.to(room.id).emit('matchFound', {
+            room,
+            message: `${gameMode === '2v2' ? '2v2' : '1v1'} match found! Game starting soon...`
+          });
+
           setTimeout(() => {
             const startResult = gameManager.startGame(room.id);
             if (startResult.success) {
@@ -72,27 +173,33 @@ io.on('connection', (socket) => {
                       }
                     }
                   } as any;
-                  ps.emit('gameStart', { room: sanitized, gameState: sanitized.gameState, message: 'Game started! Good luck!' });
+                  ps.emit('gameStart', {
+                    room: sanitized,
+                    gameState: sanitized.gameState,
+                    message: 'Game started! Good luck!'
+                  });
                 }
               });
             }
           }, 1000);
         }
+      } else {
+        // Send queue status for 1v1
+        const queueLength = gameManager.getMatchmakingQueue().filter(req => req.gameMode === '1v1').length;
+        const estimatedWaitTime = Math.max(10, Math.min(120, 30 * (2 - queueLength)));
+        socket.emit('matchmakingStatus', {
+          status: 'searching',
+          message: 'Looking for an opponent...',
+          estimatedWaitTime,
+          playersInQueue: queueLength
+        });
       }
-    } else {
-      const queueLength = gameManager.getMatchmakingQueue().filter(req => req.gameMode === (gameMode || '1v1')).length;
-      const estimatedWaitTime = Math.max(10, Math.min(120, 30 * (2 - queueLength)));
-      socket.emit('matchmakingStatus', { 
-        status: 'searching', 
-        message: 'Looking for an opponent...', 
-        estimatedWaitTime,
-        playersInQueue: queueLength 
-      });
     }
   });
 
   socket.on('cancelMatchmaking', () => {
     const removed = gameManager.removeFromMatchmakingQueue(socket.id);
+    console.log(`[MM] cancelMatchmaking from ${socket.id} -> removed=${removed}`);
     if (removed) socket.emit('matchmakingCancelled', { message: 'Matchmaking cancelled' });
   });
 
@@ -199,57 +306,103 @@ io.on('connection', (socket) => {
     const event: GameEvent = { type: 'challenge_response', playerId, data: { accept }, timestamp: new Date() } as any;
     const result = gameManager.processGameEvent(playerId, event);
     if (result.success && result.data) {
+      const room = result.data;
+      const gameState = room.gameState!;
+      
       if (accept) {
-        io.to(result.data.id).emit('challengeResponse', { 
+        io.to(room.id).emit('challengeResponse', { 
           playerId, 
           accept: true, 
-          gameState: result.data.gameState,
+          gameState,
           message: 'Challenge accepted! Playing for Long Point!'
         });
       } else {
-        io.to(result.data.id).emit('challengeResponse', { 
-          playerId, 
-          accept: false, 
-          gameState: result.data.gameState,
-          message: 'Challenge folded! Starting new round...'
-        });
-        // If folded, emit newRound event after a short delay
-        setTimeout(() => {
-          const updatedRoom = gameManager.getRoom(result.data!.id);
-          if (updatedRoom && updatedRoom.gameState) {
-            console.log(`Challenge folded - starting new round in room ${result.data!.id}`);
-            // Send each player their own hand
-            updatedRoom.players.forEach((p) => {
-              const ps = io.sockets.sockets.get(p.id);
-              if (ps) {
-                const sanitized = {
-                  ...updatedRoom,
-                  gameState: {
-                    ...updatedRoom.gameState!,
-                    hands: {
-                      [p.id]: updatedRoom.gameState!.hands[p.id] || [],
-                      ...Object.fromEntries(
-                        updatedRoom.players
-                          .filter(x => x.id !== p.id)
-                          .map(x => [x.id, (updatedRoom.gameState!.hands[x.id] || []).length])
-                      )
+        // Check if this was a 2v2 game and more responses are needed
+        if (room.gameMode === '2v2' && gameState.awaitingChallengeResponse) {
+          const nextRespondent = gameState.challengeRespondent;
+          io.to(room.id).emit('challengeResponse', { 
+            playerId, 
+            accept: false, 
+            gameState,
+            message: `${playerId} folded. Waiting for ${nextRespondent} to respond...`
+          });
+        } else {
+          // All opponents folded or 1v1 fold
+          io.to(room.id).emit('challengeResponse', { 
+            playerId, 
+            accept: false, 
+            gameState,
+            message: 'Challenge folded! Starting new round...'
+          });
+          
+          // Start new round after short delay
+          setTimeout(() => {
+            const updatedRoom = gameManager.getRoom(room.id);
+            if (updatedRoom && updatedRoom.gameState) {
+              console.log(`Challenge folded - starting new round in room ${room.id}`);
+              updatedRoom.players.forEach((p) => {
+                const ps = io.sockets.sockets.get(p.id);
+                if (ps) {
+                  const sanitized = {
+                    ...updatedRoom,
+                    gameState: {
+                      ...updatedRoom.gameState!,
+                      hands: {
+                        [p.id]: updatedRoom.gameState!.hands[p.id] || [],
+                        ...Object.fromEntries(
+                          updatedRoom.players
+                            .filter(x => x.id !== p.id)
+                            .map(x => [x.id, (updatedRoom.gameState!.hands[x.id] || []).length])
+                        )
+                      }
                     }
-                  }
-                } as any;
-                console.log(`Sending new round after fold to player ${p.name}, hand size: ${sanitized.gameState.hands[p.id].length}`);
-                ps.emit('newRound', { 
-                  room: sanitized, 
-                  gameState: sanitized.gameState, 
-                  message: 'New round started!',
-                  scores: updatedRoom.gameState!.scores
-                });
-              }
-            });
-          }
-        }, 400);
+                  } as any;
+                  ps.emit('newRound', { 
+                    room: sanitized, 
+                    gameState: sanitized.gameState, 
+                    message: 'New round started!',
+                    scores: updatedRoom.gameState!.scores
+                  });
+                }
+              });
+            }
+          }, 400);
+        }
       }
     } else {
       socket.emit('error', { message: result.error || 'Failed to respond to challenge' });
+    }
+  });
+
+  // New 2v2 specific events
+  socket.on('callBrelan', (cards) => {
+    const playerId = socket.id;
+    const event: GameEvent = { type: 'brelan_called', playerId, data: { cards }, timestamp: new Date() } as any;
+    const result = gameManager.processGameEvent(playerId, event);
+    if (result.success && result.data) {
+      io.to(result.data.id).emit('brellanCalled', { 
+        playerId, 
+        cards,
+        gameState: result.data.gameState,
+        message: 'BRELAN called! (3 of a kind = automatic TRUT)'
+      });
+    } else {
+      socket.emit('error', { message: result.error || 'Failed to call brelan' });
+    }
+  });
+
+  socket.on('startFortialPhase', () => {
+    const playerId = socket.id;
+    const event: GameEvent = { type: 'fortial_phase', playerId, data: {}, timestamp: new Date() } as any;
+    const result = gameManager.processGameEvent(playerId, event);
+    if (result.success && result.data) {
+      io.to(result.data.id).emit('fortialPhase', { 
+        playerId, 
+        gameState: result.data.gameState,
+        message: 'Fortial phase! (6 truts + 2 cannets)'
+      });
+    } else {
+      socket.emit('error', { message: result.error || 'Failed to start fortial phase' });
     }
   });
 
@@ -289,66 +442,100 @@ io.on('connection', (socket) => {
   socket.emit('connected', { message: 'Connected to TRUT multiplayer server', playerId: socket.id, timestamp: new Date() });
 });
 
+// Enhanced matchmaking interval for 1v1 and 2v2 support
 setInterval(() => {
-  const queue = gameManager.getMatchmakingQueue();
-  const byMode = queue.reduce((acc: any, req) => { (acc[req.gameMode] ||= []).push(req); return acc; }, {} as Record<string, any[]>);
-  
-  Object.entries(byMode).forEach(([mode, requests]) => {
-    const requestList = requests as any[];
-    
-    if (requestList.length >= 2) {
-      const match = gameManager.findMatch(mode);
-      if (match && match.length === 2) {
-        const [p1, p2] = match;
-        const room = gameManager.createRoom(p1.playerId, p1.playerName || 'Player 1', mode, 2);
-        const join = gameManager.joinRoom(room.id, p2.playerId, p2.playerName || 'Player 2');
-        if (join.success && join.data) {
-          const s1 = io.sockets.sockets.get(p1.playerId);
-          const s2 = io.sockets.sockets.get(p2.playerId);
-          if (s1 && s2) {
-            s1.join(room.id); s2.join(room.id);
-            io.to(room.id).emit('matchFound', { room: join.data, message: 'Match found! Get ready to play!' });
-            setTimeout(() => {
-              const startResult = gameManager.startGame(room.id);
-              if (startResult.success) {
-                const startedRoom = gameManager.getRoom(room.id)!;
-                startedRoom.players.forEach((p) => {
-                  const ps = io.sockets.sockets.get(p.id);
-                  if (ps && startedRoom.gameState) {
-                    const sanitized = {
-                      ...startedRoom,
-                      gameState: {
-                        ...startedRoom.gameState,
-                        hands: {
-                          [p.id]: startedRoom.gameState.hands[p.id],
-                          ...Object.fromEntries(
-                            startedRoom.players
-                              .filter(x => x.id !== p.id)
-                              .map(x => [x.id, startedRoom.gameState!.hands[x.id].length])
-                          )
-                        }
-                      }
-                    } as any;
-                    ps.emit('gameStart', { room: sanitized, gameState: sanitized.gameState, message: 'Game started! Good luck!' });
-                  }
-                });
-              }
-            }, 500);
-          }
-        }
+  console.log('Running periodic matchmaking check...');
+  const createdGames = gameManager.processAllMatchmaking();
+  console.log(`Found ${createdGames.length} matches during periodic check`);
+
+  createdGames.forEach(({ gameMode, room, betAmount }) => {
+    console.log(`Creating game for ${gameMode} in room ${room.id} with ${room.players.length} players`);
+
+    // Join all players to socket room
+    room.players.forEach(player => {
+      const playerSocket = io.sockets.sockets.get(player.id);
+      if (playerSocket) {
+        playerSocket.join(room.id);
+        console.log(`Player ${player.id} joined room ${room.id}`);
+      } else {
+        console.log(`Warning: Player ${player.id} socket not found for room join`);
       }
-    } else if (requestList.length === 1) {
-      // Send status update to waiting player
-      const waitingPlayer = requestList[0];
-      const waitTime = Math.floor((Date.now() - waitingPlayer.timestamp.getTime()) / 1000);
-      const estimatedWaitTime = Math.max(5, 45 - waitTime);
-      const socket = io.sockets.sockets.get(waitingPlayer.playerId);
-      if (socket) {
+    });
+
+    io.to(room.id).emit('matchFound', {
+      room,
+      message: `${gameMode === '2v2' ? '2v2' : '1v1'} match found! Get ready to play!`
+    });
+
+    setTimeout(() => {
+      console.log(`Starting game in room ${room.id}`);
+      const startResult = gameManager.startGame(room.id);
+      if (startResult.success) {
+        const startedRoom = gameManager.getRoom(room.id)!;
+        console.log(`Game started successfully in room ${room.id}, sending to ${startedRoom.players.length} players`);
+        startedRoom.players.forEach((p) => {
+          const ps = io.sockets.sockets.get(p.id);
+          if (ps && startedRoom.gameState) {
+            const sanitized = {
+              ...startedRoom,
+              gameState: {
+                ...startedRoom.gameState,
+                hands: {
+                  [p.id]: startedRoom.gameState.hands[p.id],
+                  ...Object.fromEntries(
+                    startedRoom.players
+                      .filter(x => x.id !== p.id)
+                      .map(x => [x.id, startedRoom.gameState!.hands[x.id].length])
+                  )
+                }
+              }
+            } as any;
+            ps.emit('gameStart', {
+              room: sanitized,
+              gameState: sanitized.gameState,
+              message: 'Game started! Good luck!'
+            });
+            console.log(`Sent gameStart to player ${p.name} (${p.id})`);
+          } else {
+            console.log(`Warning: Could not send gameStart to player ${p.id} (socket: ${!!ps}, gameState: ${!!startedRoom.gameState})`);
+          }
+        });
+      } else {
+        console.log(`Failed to start game in room ${room.id}: ${startResult.error}`);
+      }
+    }, 500);
+  });
+
+  // Send status updates to waiting players
+  const queue = gameManager.getMatchmakingQueue();
+  const waitingPlayers = queue.filter(req => {
+    const waitTime = Math.floor((Date.now() - req.timestamp.getTime()) / 1000);
+    return waitTime > 5; // Only send updates after 5 seconds
+  });
+
+  console.log(`Sending status updates to ${waitingPlayers.length} waiting players`);
+
+  waitingPlayers.forEach(waitingPlayer => {
+    const waitTime = Math.floor((Date.now() - waitingPlayer.timestamp.getTime()) / 1000);
+    const socket = io.sockets.sockets.get(waitingPlayer.playerId);
+    if (socket) {
+      if (waitingPlayer.gameMode === '2v2') {
+        const queueStatus = gameManager.get2v2QueueStatus(300);
+        socket.emit('matchmakingStatus', {
+          status: 'searching',
+          message: `Still searching for ${waitingPlayer.teamMode === 'solo' ? 'players' : 'team opponents'}...`,
+          estimatedWaitTime: queueStatus.estimatedWaitTime,
+          playersInQueue: queueStatus.playersInQueue,
+          waitTime
+        });
+      } else {
+        const queueLength = queue.filter(req => req.gameMode === '1v1').length;
+        const estimatedWaitTime = Math.max(5, 45 - waitTime);
         socket.emit('matchmakingStatus', {
           status: 'searching',
           message: 'Still searching for an opponent...',
           estimatedWaitTime,
-          playersInQueue: 1,
+          playersInQueue: queueLength,
           waitTime
         });
       }

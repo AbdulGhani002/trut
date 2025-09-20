@@ -1,12 +1,13 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { useMultiplayerStore } from "@/lib/multiplayer/store";
-import { logout } from "./actions";
 
 const GameView = dynamic(() => import("@/components/game/GameView"), { ssr: false });
 
 export default function Home() {
+  const router = useRouter();
   const store = useMultiplayerStore();
   const [tokens, setTokens] = useState<number>(1000);
   const [nameInput, setNameInput] = useState<string>("");
@@ -64,6 +65,36 @@ export default function Home() {
     });
   }, [connected, store]);
 
+  const handle2v2Click = useCallback(() => {
+    if (!connected) {
+      alert('Not connected to server. Please wait...');
+      return;
+    }
+    // Go directly to 2v2 matchmaking with solo queue (auto-assign teams)
+    router.push('/game/2v2?teamMode=solo');
+  }, [connected, router]);
+
+  const handleLogout = useCallback(async () => {
+    try {
+      // Clear localStorage
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('playerName');
+      }
+      
+      // Disconnect from socket
+      store.disconnect();
+      
+      // Clear the cookie by setting it to expire
+      document.cookie = 'playerName=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+      
+      // Navigate to login page
+      router.push('/login');
+    } catch (error) {
+      console.error('Error during logout:', error);
+      // Even if there's an error, still navigate to login
+      router.push('/login');
+    }
+  }, [store, router]);
 
   const tiles = useMemo(
     () => [
@@ -97,10 +128,10 @@ export default function Home() {
       {
         key: "multi",
         title: "Realtime 2v2",
-        subtitle: "Play online • Variable bet",
+        subtitle: "Play online • 300 tokens",
         emoji: "👥",
         gradient: "from-emerald-600 to-green-600",
-        onClick: () => alert("2v2 mode coming soon"),
+        onClick: handle2v2Click,
       },
       {
         key: "tutorial",
@@ -126,7 +157,7 @@ export default function Home() {
         gradient: "from-blue-600 to-indigo-600",
         onClick: () => alert("Statistics coming soon"),
       },
-    ], [connected, store.matchmakingStatus, store.estimatedWaitTime, handleFindMatch]
+    ], [connected, store.matchmakingStatus, store.estimatedWaitTime, handleFindMatch, handle2v2Click]
   );
 
   return (
@@ -217,20 +248,17 @@ export default function Home() {
           </section>
 
           <section className="max-w-5xl mx-auto mt-8 flex justify-center">
-            <form action={logout}>
-              <button
-                type="submit"
-                className="px-6 py-3 rounded-lg bg-red-600 hover:bg-red-500 transition text-white font-semibold shadow-lg"
-                title="Logout and return to login page"
-                onClick={(e) => {
-                  if (!confirm('Are you sure you want to logout? You will need to enter your name again.')) {
-                    e.preventDefault();
-                  }
-                }}
-              >
-                Logout
-              </button>
-            </form>
+            <button
+              onClick={() => {
+                if (confirm('Are you sure you want to logout? You will need to enter your name again.')) {
+                  handleLogout();
+                }
+              }}
+              className="px-6 py-3 rounded-lg bg-red-600 hover:bg-red-500 transition text-white font-semibold shadow-lg"
+              title="Logout and return to login page"
+            >
+              Logout
+            </button>
           </section>
         </>
       )}
@@ -258,6 +286,7 @@ export default function Home() {
           {store.gameState && <GameView />}
         </>
       )}
+
     </div>
   );
 }

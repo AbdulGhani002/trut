@@ -24,9 +24,25 @@ export interface ServerToClientEvents {
     gameState: TrutGameState;
     message: string;
   }) => void;
+  brellanCalled: (data: {
+    playerId: string;
+    cards: Card[];
+    gameState: TrutGameState;
+    message: string;
+  }) => void;
   challengeResponse: (data: {
     playerId: string;
     accept: boolean;
+    gameState: TrutGameState;
+    message: string;
+  }) => void;
+  rottenTrick: (data: {
+    trickCards: Card[];
+    gameState: TrutGameState;
+    message: string;
+  }) => void;
+  fortialPhase: (data: {
+    playerId: string;
     gameState: TrutGameState;
     message: string;
   }) => void;
@@ -40,6 +56,7 @@ export interface ServerToClientEvents {
     gameState: TrutGameState;
     winner: 'team1' | 'team2';
     message: string;
+    prizeDistribution?: { [playerId: string]: number };
   }) => void;
   leftRoom: (data: { message: string }) => void;
   playerLeft: (data: { playerId: string; message: string }) => void;
@@ -51,15 +68,17 @@ export interface ServerToClientEvents {
 }
 
 export interface ClientToServerEvents {
-  startMatchmaking: (data: { gameMode: string; playerName: string }) => void;
+  startMatchmaking: (data: { gameMode: '1v1' | '2v2'; playerName: string; betAmount?: number; teamMode?: 'solo' | 'team'; teamMateId?: string }) => void;
   cancelMatchmaking: () => void;
   setReady: (isReady: boolean) => void;
   playCard: (data: { cardId: string; cardData: Card }) => void;
   callTrut: () => void;
+  callBrelan: (cards: Card[]) => void; // For announcing brelan (3 of a kind)
   respondToChallenge: (accept: boolean) => void;
   leaveRoom: () => void;
   sendChatMessage: (message: string) => void;
   getRoomInfo: () => void;
+  startFortialPhase: () => void; // For 6 truts + 2 cannets situation
 }
 
 export interface ChatMessage {

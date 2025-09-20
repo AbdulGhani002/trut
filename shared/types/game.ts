@@ -26,6 +26,7 @@ export interface Player {
   isConnected: boolean;
   socketId: string;
   joinedAt: Date;
+  team?: 'team1' | 'team2'; // For 2v2 mode
 }
 
 export interface GameRoom {
@@ -33,10 +34,13 @@ export interface GameRoom {
   hostId: string;
   players: Player[];
   maxPlayers: number;
-  gameMode: string;
+  gameMode: '1v1' | '2v2';
   status: GameStatus;
   createdAt: Date;
   gameState?: TrutGameState;
+  betAmount?: number; // For 2v2 mode
+  teamMode?: 'solo' | 'team'; // For 2v2 mode
+  prizePool?: number; // For 2v2 mode
 }
 
 export interface TrutGameState {
@@ -55,23 +59,35 @@ export interface TrutGameState {
   challengeAccepted: boolean;
   awaitingChallengeResponse?: boolean;
   challengeRespondent?: string;
+  challengeRespondents?: string[]; // For 2v2 mode - multiple opponents can respond
+  pendingChallengeResponses?: { playerId: string; response?: boolean }[]; // For 2v2 tracking
   roundNumber?: number;
   gameEnded?: boolean;
   winner?: 'team1' | 'team2';
   roundEndedAt?: Date;
   newRoundStarted?: boolean;
+  rottenTricks?: TrickCard[][]; // Store rotten tricks separately
+  maxRounds?: number; // Total rounds in game (best of 3 tricks per round)
+  dealerIndex?: number; // Current dealer for proper dealing rotation
+  hasBrelanned?: boolean; // If someone declared brelan
+  brellanPlayer?: string; // Who declared brelan
+  isFortialing?: boolean; // Special Fortial phase (6 truts + 2 cannets)
+  fortialer?: string; // Player who can look at cards first in Fortial
 }
 
 export interface MatchmakingRequest {
   playerId: string;
-  gameMode: string;
+  gameMode: '1v1' | '2v2';
   playerName?: string;
   skillLevel?: number;
   timestamp: Date;
+  betAmount?: number; // For 2v2 mode
+  teamMode?: 'solo' | 'team'; // For 2v2 mode
+  teamMateId?: string; // For team mode
 }
 
 export interface GameEvent {
-  type: 'card_played' | 'trut_called' | 'challenge_response' | 'game_start' | 'game_end' | 'turn_change';
+  type: 'card_played' | 'trut_called' | 'challenge_response' | 'game_start' | 'game_end' | 'turn_change' | 'brelan_called' | 'fortial_phase' | 'rotten_trick';
   playerId: string;
   data: any;
   timestamp: Date;
