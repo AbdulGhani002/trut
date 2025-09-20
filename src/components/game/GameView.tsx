@@ -1,5 +1,5 @@
 "use client";
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useMultiplayerStore } from '@/lib/multiplayer/store';
 import GameHeader from './GameHeader';
 import ScorePanel from './ScorePanel';
@@ -8,9 +8,11 @@ import GameTable from './GameTable';
 import PlayerHand from './PlayerHand';
 import GameEndScreen from './GameEndScreen';
 import { Card } from '../../../shared/types/game';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
 export default function GameView() {
   const { gameState, myPlayerId, leaveGame, currentRoom } = useMultiplayerStore();
+  const [confirmOpen, setConfirmOpen] = useState(false);
   
   // Get players (memoized to prevent dependency issues) - must be before early return
   const players = useMemo(() => currentRoom?.players || [], [currentRoom?.players]);
@@ -60,16 +62,28 @@ export default function GameView() {
 
 
   const handleLeaveGame = () => {
-    if (window.confirm('Are you sure you want to leave the game?')) {
-      const success = leaveGame();
-      if (!success) {
-        alert('Failed to leave the game. You may be disconnected from the server. Please refresh the page to reconnect.');
-      }
+    setConfirmOpen(true);
+  };
+
+  const handleConfirmLeave = () => {
+    setConfirmOpen(false);
+    const success = leaveGame();
+    if (!success) {
+      alert('Failed to leave the game. You may be disconnected from the server. Please refresh the page to reconnect.');
     }
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Leave Match"
+        message="Are you sure you want to leave the game?"
+        confirmText="Leave"
+        cancelText="Stay"
+        onConfirm={handleConfirmLeave}
+        onCancel={() => setConfirmOpen(false)}
+      />
       <GameHeader currentRoom={currentRoom} onLeaveGame={handleLeaveGame} />
 
       {/* Main Game Area */}

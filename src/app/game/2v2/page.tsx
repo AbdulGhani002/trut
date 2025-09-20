@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMultiplayerStore } from "@/lib/multiplayer/store";
 import GameTable2v2 from "@/components/game/GameTable2v2";
 import PlayerHand from "@/components/game/PlayerHand";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 // import { Card, TrickCard } from "@/../shared/types/game";
 
 export default function Game2v2Page() {
@@ -11,6 +12,7 @@ export default function Game2v2Page() {
   const searchParams = useSearchParams();
   const store = useMultiplayerStore();
   const hasStartedMatchmaking = useRef(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   
   const [gameData] = useState({
     betAmount: 300, // Fixed bet amount for 2v2 games
@@ -71,29 +73,30 @@ export default function Game2v2Page() {
     (!currentRoom && hasStartedMatchmaking.current);
 
   const handleLeaveGame = () => {
-    if (window.confirm('Are you sure you want to leave the game?')) {
-      console.log('Leaving 2v2 game, current matchmaking status:', store.matchmakingStatus);
-      
-      // Cancel any active matchmaking first
-      if (store.matchmakingStatus === 'searching') {
-        console.log('Cancelling active 2v2 matchmaking...');
-        store.cancelMatchmaking();
-      }
-      
-      // Then leave the game/room
-      store.leaveGame();
-      
-      console.log('Navigating back to dashboard, matchmaking status should be idle:', store.matchmakingStatus);
-      
-      // Navigate back to dashboard
-      router.push('/');
-    }
+    setConfirmOpen(true);
   };
 
   // Show matchmaking screen while searching / waiting
   if (isWaiting) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-6">
+        <ConfirmDialog
+          open={confirmOpen}
+          title="Leave Match"
+          message="Are you sure you want to leave the game?"
+          confirmText="Leave"
+          cancelText="Stay"
+          onConfirm={() => {
+            setConfirmOpen(false);
+            // Cancel any active matchmaking first
+            if (store.matchmakingStatus === 'searching') {
+              store.cancelMatchmaking();
+            }
+            store.leaveGame();
+            router.push('/');
+          }}
+          onCancel={() => setConfirmOpen(false)}
+        />
         <div className="glass-panel p-8 max-w-md w-full text-center">
           <div className="animate-spin w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
           <h2 className="text-2xl font-bold text-white mb-2">Finding Match...</h2>
@@ -124,6 +127,23 @@ export default function Game2v2Page() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6">
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Leave Match"
+        message="Are you sure you want to leave the game?"
+        confirmText="Leave"
+        cancelText="Stay"
+        onConfirm={() => {
+          setConfirmOpen(false);
+          // Cancel any active matchmaking first
+          if (store.matchmakingStatus === 'searching') {
+            store.cancelMatchmaking();
+          }
+          store.leaveGame();
+          router.push('/');
+        }}
+        onCancel={() => setConfirmOpen(false)}
+      />
       {/* Header */}
       <div className="max-w-7xl mx-auto mb-6">
         <div className="glass-panel p-4">

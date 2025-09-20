@@ -34,7 +34,7 @@ export default function GameTable2v2({ currentTrick, myPlayerId, players }: Game
               <div className="text-center">
                 <div className="text-white/60 text-xs mb-2">{teammate.name}</div>
                 {getCardForPlayer(teammate.id) && (
-                  <div className="transform -rotate-2 hover:rotate-0 transition-transform duration-300">
+                  <div className="transition-transform duration-300">
                     <PlayingCard card={getCardForPlayer(teammate.id)!.card} size="small" />
                   </div>
                 )}
@@ -50,7 +50,7 @@ export default function GameTable2v2({ currentTrick, myPlayerId, players }: Game
                   {opponents[0].name}
                 </div>
                 {getCardForPlayer(opponents[0].id) && (
-                  <div className="transform -rotate-90 hover:rotate-0 transition-transform duration-300">
+                  <div className="transition-transform duration-300">
                     <PlayingCard card={getCardForPlayer(opponents[0].id)!.card} size="small" />
                   </div>
                 )}
@@ -66,7 +66,7 @@ export default function GameTable2v2({ currentTrick, myPlayerId, players }: Game
                   {opponents[1].name}
                 </div>
                 {getCardForPlayer(opponents[1].id) && (
-                  <div className="transform rotate-90 hover:rotate-0 transition-transform duration-300">
+                  <div className="transition-transform duration-300">
                     <PlayingCard card={getCardForPlayer(opponents[1].id)!.card} size="small" />
                   </div>
                 )}
@@ -93,7 +93,7 @@ export default function GameTable2v2({ currentTrick, myPlayerId, players }: Game
             <div className="text-center">
               <div className="text-white/60 text-xs mb-2">You</div>
               {myPlayerId && getCardForPlayer(myPlayerId) && (
-                <div className="transform rotate-2 hover:rotate-0 transition-transform duration-300">
+                <div className="transition-transform duration-300">
                   <PlayingCard card={getCardForPlayer(myPlayerId)!.card} size="small" />
                 </div>
               )}
