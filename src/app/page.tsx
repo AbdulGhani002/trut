@@ -96,11 +96,11 @@ export default function Home() {
       },
       {
         key: "multi",
-        title: "Multiplayer",
+        title: "Realtime 2v2",
         subtitle: "Play online • Variable bet",
         emoji: "👥",
         gradient: "from-emerald-600 to-green-600",
-        onClick: () => alert("Multiplayer lobby coming soon"),
+        onClick: () => alert("2v2 mode coming soon"),
       },
       {
         key: "tutorial",
@@ -139,36 +139,40 @@ export default function Home() {
           </header>
 
           {store.matchmakingStatus === 'searching' && (
-            <section className="max-w-4xl mx-auto glass-panel p-6 mb-8 text-center">
-              <div className="flex items-center justify-center gap-3 mb-4">
-                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-yellow-400"></div>
-                <h3 className="text-lg font-semibold text-yellow-400">Searching for Opponent</h3>
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+              <div className="glass-panel p-8 text-center max-w-md mx-auto">
+                <div className="flex items-center justify-center gap-3 mb-4">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-yellow-400"></div>
+                  <h3 className="text-lg font-semibold text-yellow-400">Searching for Opponent</h3>
+                </div>
+                <p className="text-white/70 mb-6">
+                  {store.estimatedWaitTime
+                    ? `Estimated wait time: ~${store.estimatedWaitTime} seconds`
+                    : "Looking for another player to join your game..."
+                  }
+                </p>
+                <button
+                  onClick={() => store.cancelMatchmaking()}
+                  className="px-6 py-3 rounded-lg bg-red-600 hover:bg-red-500 transition text-white font-semibold shadow-lg"
+                >
+                  Cancel Search
+                </button>
               </div>
-              <p className="text-white/70 mb-4">
-                {store.estimatedWaitTime 
-                  ? `Estimated wait time: ~${store.estimatedWaitTime} seconds`
-                  : "Looking for another player to join your game..."
-                }
-              </p>
-              <button
-                onClick={() => store.cancelMatchmaking()}
-                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 transition text-white font-semibold"
-              >
-                Cancel Search
-              </button>
-            </section>
+            </div>
           )}
 
           {store.matchmakingStatus === 'found' && (
-            <section className="max-w-4xl mx-auto glass-panel p-6 mb-8 text-center">
-              <div className="flex items-center justify-center gap-3 mb-4">
-                <div className="text-green-400 text-2xl">✅</div>
-                <h3 className="text-lg font-semibold text-green-400">Match Found!</h3>
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+              <div className="glass-panel p-8 text-center max-w-md mx-auto">
+                <div className="flex items-center justify-center gap-3 mb-4">
+                  <div className="text-green-400 text-2xl">✅</div>
+                  <h3 className="text-lg font-semibold text-green-400">Match Found!</h3>
+                </div>
+                <p className="text-white/70 mb-6">
+                  Opponent found! Starting game...
+                </p>
               </div>
-              <p className="text-white/70">
-                Opponent found! Starting game...
-              </p>
-            </section>
+            </div>
           )}
 
           <section className="max-w-4xl mx-auto glass-panel p-4 md:p-5 flex items-center justify-between gap-3">
@@ -186,20 +190,6 @@ export default function Home() {
               >
                 Free Tokens
               </button>
-              <form action={logout}>
-                <button
-                  type="submit"
-                  className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 transition text-sm font-semibold shadow-lg"
-                  title="Logout and return to login page"
-                  onClick={(e) => {
-                    if (!confirm('Are you sure you want to logout? You will need to enter your name again.')) {
-                      e.preventDefault();
-                    }
-                  }}
-                >
-                  Logout
-                </button>
-              </form>
               <div className="text-right">
                 <div className="font-bold">{tokens}</div>
                 <div className="text-xs text-white/50">Virtual Tokens</div>
@@ -207,8 +197,8 @@ export default function Home() {
             </div>
           </section>
 
-          <section className="max-w-5xl mx-auto mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {tiles.slice(0, 5).map((tile) => (
+          <section className="max-w-5xl mx-auto mt-8 grid grid-cols-3 gap-5">
+            {tiles.map((tile) => (
               <button
                 key={tile.key}
                 onClick={tile.onClick}
@@ -224,21 +214,23 @@ export default function Home() {
                 </div>
               </button>
             ))}
-            {/* Statistics tile spanning full width on large row */}
-            <button
-              onClick={tiles[5].onClick}
-              className="group text-left glass-panel p-5 hover:-translate-y-0.5 transition transform sm:col-span-2 lg:col-span-3"
-            >
-              <div className="flex items-center gap-4">
-                <div className={`h-12 w-12 rounded-xl bg-gradient-to-br ${tiles[5].gradient} grid place-items-center text-xl shadow-lg`}>
-                  <span>{tiles[5].emoji}</span>
-                </div>
-                <div>
-                  <div className="font-semibold text-lg">{tiles[5].title}</div>
-                  <div className="text-sm text-white/60">{tiles[5].subtitle}</div>
-                </div>
-              </div>
-            </button>
+          </section>
+
+          <section className="max-w-5xl mx-auto mt-8 flex justify-center">
+            <form action={logout}>
+              <button
+                type="submit"
+                className="px-6 py-3 rounded-lg bg-red-600 hover:bg-red-500 transition text-white font-semibold shadow-lg"
+                title="Logout and return to login page"
+                onClick={(e) => {
+                  if (!confirm('Are you sure you want to logout? You will need to enter your name again.')) {
+                    e.preventDefault();
+                  }
+                }}
+              >
+                Logout
+              </button>
+            </form>
           </section>
         </>
       )}
