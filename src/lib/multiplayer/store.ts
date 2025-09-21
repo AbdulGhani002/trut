@@ -131,47 +131,30 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
       set({ matchmakingStatus: 'cancelled', estimatedWaitTime: null });
     });
     socket.on('gameStart', (data: SocketEventData['gameStart']) => {
-      set({ currentRoom: data.room || get().currentRoom, gameState: data.gameState || null, matchmakingStatus: 'idle', estimatedWaitTime: null });
+      // Use server state as single source of truth - no optimistic updates
+      set({ 
+        currentRoom: data.room || get().currentRoom, 
+        gameState: data.gameState || null, 
+        matchmakingStatus: 'idle', 
+        estimatedWaitTime: null 
+      });
     });
     socket.on('cardPlayed', (data: SocketEventData['cardPlayed']) => {
-      // Immediate update for responsive gameplay
+      // Use server state as single source of truth - no optimistic updates
       set({ gameState: data.gameState || get().gameState });
     });
     socket.on('trutCalled', (data: SocketEventData['trutCalled']) => {
-      const gs = { 
-        ...(get().gameState || {}), 
-        phase: 'truting' as const, 
-        hasPlayerTruted: true, 
-        trutingPlayer: data.playerId,
-        awaitingChallengeResponse: data.gameState?.awaitingChallengeResponse || false,
-        challengeRespondent: data.gameState?.challengeRespondent
-      } as TrutGameState;
-      set({ gameState: gs });
+      // Use server state as single source of truth - no optimistic updates
+      set({ gameState: data.gameState || get().gameState });
     });
     socket.on('challengeResponse', (data: SocketEventData['challengeResponse']) => {
-      const gs = { 
-        ...(get().gameState || {}), 
-        phase: data.accept ? 'playing' as const : 'scoring' as const, 
-        challengeAccepted: !!data.accept,
-        awaitingChallengeResponse: false
-      } as TrutGameState;
-      set({ gameState: gs });
+      // Use server state as single source of truth - no optimistic updates
+      set({ gameState: data.gameState || get().gameState });
     });
     socket.on('newRound', (data: SocketEventData['newRound']) => {
       console.log('New round started:', data);
-      // Ensure we update the game state with new hands and reset phase
-      const newGameState = {
-        ...(data.gameState || {}),
-        scores: data.scores || data.gameState?.scores,
-        phase: 'playing' as const, // Explicitly reset phase to playing
-        awaitingChallengeResponse: false,
-        challengeAccepted: false,
-        hasPlayerTruted: false,
-        trutingPlayer: undefined,
-        challengeRespondent: undefined
-      } as TrutGameState;
-      console.log('Setting new game state with hands:', newGameState.hands);
-      set({ gameState: newGameState });
+      // Use server state as single source of truth - no optimistic updates
+      set({ gameState: data.gameState || get().gameState });
     });
     // Add new 2v2 event handlers
     socket.on('brellanCalled', (data: SocketEventData['brellanCalled']) => {

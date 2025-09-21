@@ -101,7 +101,7 @@ export class GameManager {
 
     switch (event.type) {
       case 'card_played':
-        result = this.gameEngine.processCardPlay(room.gameState, playerId, event.data.cardData);
+        result = this.gameEngine.processCardPlay(room.gameState, playerId, event.data.cardData, room.players);
         break;
       case 'trut_called':
         result = this.gameEngine.processTrutCall(room.gameState, playerId, room.players);

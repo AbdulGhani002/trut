@@ -20,7 +20,7 @@ export class TrutGameEngine {
     return { success: true, data: gameState };
   }
 
-  processCardPlay(gameState: TrutGameState, playerId: string, cardData: Card): GameResult<TrutGameState> {
+  processCardPlay(gameState: TrutGameState, playerId: string, cardData: Card, roomPlayers?: Player[]): GameResult<TrutGameState> {
     if (gameState.currentPlayer !== playerId) {
       return { success: false, error: 'Not your turn' };
     }
@@ -49,7 +49,7 @@ export class TrutGameEngine {
       // Check if round is complete (all hands empty)
       const handsEmpty = players.every(p => gameState.hands[p].length === 0);
       if (handsEmpty) {
-        this.scoreRound(gameState, players);
+        this.scoreRound(gameState, players, roomPlayers || []);
         
         // Check for game end
         if (this.isGameEnded(gameState)) {
@@ -170,7 +170,8 @@ export class TrutGameEngine {
         gameState.awaitingChallengeResponse = false;
         
         const playerIds = Object.keys(gameState.hands);
-        const trutingTeam = this.getTeamForPlayer(playerIds, gameState.trutingPlayer!);
+        // For 1v1 mode, use simple position-based logic
+        const trutingTeam = this.getTeamForPlayer1v1(playerIds, gameState.trutingPlayer!);
         const teamKey = trutingTeam === 1 ? 'team1' : 'team2';
         gameState.scores[teamKey].cannets++;
         this.convertCannets(gameState.scores);
@@ -292,7 +293,7 @@ export class TrutGameEngine {
     }));
   }
 
-  private scoreRound(gameState: TrutGameState, players: string[]): void {
+  private scoreRound(gameState: TrutGameState, players: string[], roomPlayers: Player[]): void {
     // Count trick winners by team
     let team1Tricks = 0;
     let team2Tricks = 0;
@@ -303,13 +304,13 @@ export class TrutGameEngine {
         // If this is the last trick and it's rotten, it goes to the last non-rotten winner
         const nextWinner = this.findNextNonRottenWinner(gameState.trickWinners, index);
         if (nextWinner) {
-          const team = this.getTeamForPlayer(players, nextWinner);
-          if (team === 1) team1Tricks++;
+          const team = this.getTeamForPlayer(roomPlayers, nextWinner);
+          if (team === 'team1') team1Tricks++;
           else team2Tricks++;
         }
       } else {
-        const team = this.getTeamForPlayer(players, winnerId);
-        if (team === 1) team1Tricks++;
+        const team = this.getTeamForPlayer(roomPlayers, winnerId);
+        if (team === 'team1') team1Tricks++;
         else team2Tricks++;
       }
     });
@@ -326,20 +327,20 @@ export class TrutGameEngine {
       // Trut was called but folded - already handled in processChallengeResponse
     } else {
       // Trut was accepted - winner gets long token, loser loses all small tokens
-      const trutingTeam = this.getTeamForPlayer(players, gameState.trutingPlayer!);
-      const trutingWins = trutingTeam === 1 ? team1Tricks : team2Tricks;
-      const oppWins = trutingTeam === 1 ? team2Tricks : team1Tricks;
+      const trutingTeam = this.getTeamForPlayer(roomPlayers, gameState.trutingPlayer!);
+      const trutingWins = trutingTeam === 'team1' ? team1Tricks : team2Tricks;
+      const oppWins = trutingTeam === 'team1' ? team2Tricks : team1Tricks;
       
       if (trutingWins > oppWins) {
         // Truting team wins
-        const teamKey = trutingTeam === 1 ? 'team1' : 'team2';
-        const oppKey = trutingTeam === 1 ? 'team2' : 'team1';
+        const teamKey = trutingTeam;
+        const oppKey = trutingTeam === 'team1' ? 'team2' : 'team1';
         gameState.scores[teamKey].truts++;
         gameState.scores[oppKey].cannets = 0; // Opponent loses all small tokens
       } else if (oppWins > trutingWins) {
         // Opposing team wins
-        const oppKey = trutingTeam === 1 ? 'team2' : 'team1';
-        const teamKey = trutingTeam === 1 ? 'team1' : 'team2';
+        const oppKey = trutingTeam === 'team1' ? 'team2' : 'team1';
+        const teamKey = trutingTeam;
         gameState.scores[oppKey].truts++;
         gameState.scores[teamKey].cannets = 0; // Truting team loses all small tokens
       }
@@ -399,8 +400,19 @@ export class TrutGameEngine {
     console.log(`New round ${roundNumber} started, starting player: ${gameState.currentPlayer}`);
   }
 
-  private getTeamForPlayer(players: string[], playerId: string): 1 | 2 {
-    const index = players.findIndex(p => p === playerId);
+  private getTeamForPlayer(players: Player[], playerId: string): 'team1' | 'team2' {
+    // Find the player by ID and return their assigned team property
+    const player = players.find(p => p.id === playerId);
+    if (!player || !player.team) {
+      console.error(`CRITICAL: Could not find player ${playerId} or their team. Awarding point to team2 as safe default.`);
+      return 'team2'; // Safe fallback
+    }
+    return player.team;
+  }
+
+  // Legacy method for 1v1 mode
+  private getTeamForPlayer1v1(playerIds: string[], playerId: string): 1 | 2 {
+    const index = playerIds.findIndex(p => p === playerId);
     return index === 0 ? 1 : 2;
   }
 

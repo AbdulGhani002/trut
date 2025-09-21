@@ -65,6 +65,25 @@ export default function Game2v2Page() {
   const currentTrick = gameState?.currentTrick || [];
   const myHand = gameState?.hands?.[myPlayerId || ''] || [];
   const scores = gameState?.scores || { team1: { truts: 0, cannets: 0 }, team2: { truts: 0, cannets: 0 } };
+  
+  // Calculate actual tricks won by teams
+  const trickWinners = gameState?.trickWinners || [];
+  const myPlayer = players.find(p => p.id === myPlayerId);
+  const myTeam = myPlayer?.team || 'team1';
+  const opponentTeam = myTeam === 'team1' ? 'team2' : 'team1';
+  
+  // Count tricks won by each team
+  const myTeamTricks = trickWinners.filter(winner => {
+    if (winner === 'rotten') return false;
+    const winnerPlayer = players.find(p => p.id === winner);
+    return winnerPlayer?.team === myTeam;
+  }).length;
+  
+  const opponentTeamTricks = trickWinners.filter(winner => {
+    if (winner === 'rotten') return false;
+    const winnerPlayer = players.find(p => p.id === winner);
+    return winnerPlayer?.team === opponentTeam;
+  }).length;
 
   // Show waiting when: connecting, searching, or no room yet after starting matchmaking
   const isWaiting =
@@ -229,11 +248,11 @@ export default function Game2v2Page() {
                 <div className="bg-white/5 rounded-lg p-2 text-center">
                   <div className="text-sm font-medium text-white/90 mb-1">Round Progress</div>
                   <div className="flex items-center justify-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-blue-400"></div>
-                    <div className="w-3 h-3 rounded-full bg-white/20"></div>
-                    <div className="w-3 h-3 rounded-full bg-white/20"></div>
+                    <div className={`w-3 h-3 rounded-full ${myTeamTricks >= 1 ? 'bg-blue-400' : 'bg-white/20'}`}></div>
+                    <div className={`w-3 h-3 rounded-full ${myTeamTricks >= 2 ? 'bg-blue-400' : 'bg-white/20'}`}></div>
+                    <div className={`w-3 h-3 rounded-full ${myTeamTricks >= 3 ? 'bg-blue-400' : 'bg-white/20'}`}></div>
                   </div>
-                  <div className="text-xs text-white/60 mt-1">1 of 3 tricks won</div>
+                  <div className="text-xs text-white/60 mt-1">{myTeamTricks} of 3 tricks won</div>
                 </div>
               </div>
             </div>
@@ -273,11 +292,11 @@ export default function Game2v2Page() {
                 <div className="bg-white/5 rounded-lg p-2 text-center">
                   <div className="text-sm font-medium text-white/90 mb-1">Round Progress</div>
                   <div className="flex items-center justify-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-white/20"></div>
-                    <div className="w-3 h-3 rounded-full bg-white/20"></div>
-                    <div className="w-3 h-3 rounded-full bg-white/20"></div>
+                    <div className={`w-3 h-3 rounded-full ${opponentTeamTricks >= 1 ? 'bg-red-400' : 'bg-white/20'}`}></div>
+                    <div className={`w-3 h-3 rounded-full ${opponentTeamTricks >= 2 ? 'bg-red-400' : 'bg-white/20'}`}></div>
+                    <div className={`w-3 h-3 rounded-full ${opponentTeamTricks >= 3 ? 'bg-red-400' : 'bg-white/20'}`}></div>
                   </div>
-                  <div className="text-xs text-white/60 mt-1">0 of 3 tricks won</div>
+                  <div className="text-xs text-white/60 mt-1">{opponentTeamTricks} of 3 tricks won</div>
                 </div>
               </div>
             </div>
