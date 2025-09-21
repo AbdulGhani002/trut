@@ -195,8 +195,11 @@ export class TrutGameEngine {
     const deck = this.createAndShuffleDeck();
     const hands = this.dealCards(room.players.map(p => p.id), deck);
     
+    const dealerIndex = 0; // First dealer is at index 0
+    const startingPlayerIndex = (dealerIndex + 1) % room.players.length; // Player to dealer's left
+    
     return {
-      currentPlayer: room.players[0].id,
+      currentPlayer: room.players[startingPlayerIndex].id, // Player to dealer's left starts
       turn: 1,
       phase: 'playing',
       scores: { team1: { truts: 0, cannets: 0 }, team2: { truts: 0, cannets: 0 } },
@@ -208,7 +211,7 @@ export class TrutGameEngine {
       gameStarted: new Date(),
       hasPlayerTruted: false,
       challengeAccepted: false,
-      dealerIndex: 0,
+      dealerIndex: dealerIndex,
       rottenTricks: [],
       maxRounds: room.gameMode === '2v2' ? 3 : 5, // Best of 3 tricks per round in 2v2
       roundNumber: 1,
@@ -390,14 +393,20 @@ export class TrutGameEngine {
     gameState.hands = hands;
     gameState.deck = deck;
     
-    // Alternate starting player each round
-    const roundNumber = (gameState.roundNumber || 0) + 1;
-    gameState.roundNumber = roundNumber;
-    const startingPlayerIndex = (roundNumber - 1) % players.length;
+    // 1. Rotate the dealer position clockwise
+    const currentDealerIndex = gameState.dealerIndex || 0;
+    const newDealerIndex = (currentDealerIndex + 1) % players.length;
+    gameState.dealerIndex = newDealerIndex; // Update dealer in game state
+    
+    // 2. The new starting player is to the left of the new dealer
+    const startingPlayerIndex = (newDealerIndex + 1) % players.length;
     gameState.currentPlayer = players[startingPlayerIndex];
+    
+    // Keep roundNumber for display purposes
+    gameState.roundNumber = (gameState.roundNumber || 0) + 1;
     gameState.turn = 1;
     
-    console.log(`New round ${roundNumber} started, starting player: ${gameState.currentPlayer}`);
+    console.log(`New round ${gameState.roundNumber} started. New dealer: ${players[newDealerIndex]}. Starting player: ${gameState.currentPlayer}`);
   }
 
   private getTeamForPlayer(players: Player[], playerId: string): 'team1' | 'team2' {

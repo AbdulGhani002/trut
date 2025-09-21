@@ -301,37 +301,6 @@ export default function Game2v2Page() {
               </div>
             </div>
 
-            {/* Game Rules Summary */}
-            <div className="glass-panel p-4 bg-gradient-to-br from-purple-500/10 to-indigo-600/10 border border-purple-500/20">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="text-lg">📋</div>
-                <h4 className="text-sm font-bold text-white">Quick Rules</h4>
-              </div>
-              <div className="space-y-2 text-xs text-white/80">
-                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-green-400"></div>
-                  <span>Win 2/3 tricks → Win round</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-yellow-400"></div>
-                  <span>Round win → +1 small token</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-blue-400"></div>
-                  <span>3 small tokens → 1 long token</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-purple-400"></div>
-                  <span>Goal: 7 long tokens to win</span>
-                </div>
-                <div className="bg-red-500/20 border border-red-500/30 rounded p-2 mt-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-red-400">⚠️</span>
-                    <span className="text-red-300 text-xs font-medium">Risk: Opponent long token = lose all small tokens</span>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
 
           {/* Game Content - Right Side */}
