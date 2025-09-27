@@ -106,34 +106,15 @@ export default function Home() {
       {
         key: "bot",
         title: "You vs Bot",
-        subtitle: "1v1 • 100 tokens",
-        emoji: "⚡",
+        subtitle: "Practice against AI • Free",
+        emoji: "🤖",
         gradient: "from-slate-800 to-slate-700",
         onClick: handleBotClick,
       },
       {
-        key: "realtime",
-        title: "Realtime 1v1",
-        subtitle: (() => {
-          if (!connected) return "Connecting…";
-          if (store.matchmakingStatus === 'searching') {
-            return store.estimatedWaitTime 
-              ? `Searching... (~${store.estimatedWaitTime}s)`
-              : "Searching for opponent...";
-          }
-          if (store.matchmakingStatus === 'found') return "Match found! Starting...";
-          return "Live player • 100 tokens";
-        })(),
-        emoji: store.matchmakingStatus === 'searching' ? "⏳" : store.matchmakingStatus === 'found' ? "✅" : "👑",
-        gradient: store.matchmakingStatus === 'searching' ? "from-yellow-600 to-orange-600" : 
-                 store.matchmakingStatus === 'found' ? "from-green-600 to-emerald-600" : 
-                 "from-cyan-600 to-teal-600",
-        onClick: handleFindMatch,
-      },
-      {
         key: "multi",
-        title: "Realtime 2v2",
-        subtitle: "Play online • 300 tokens",
+        title: "2v2 Realtime",
+        subtitle: "Play with friends • 300 tokens",
         emoji: "👥",
         gradient: "from-emerald-600 to-green-600",
         onClick: handle2v2Click,
@@ -144,7 +125,7 @@ export default function Home() {
         subtitle: "Learn the rules",
         emoji: "📖",
         gradient: "from-fuchsia-600 to-purple-600",
-        onClick: () => alert("Tutorial coming soon"),
+        onClick: () => router.push('/tutorial'),
       },
       {
         key: "shop",
@@ -162,7 +143,7 @@ export default function Home() {
         gradient: "from-blue-600 to-indigo-600",
         onClick: () => alert("Statistics coming soon"),
       },
-    ], [connected, store.matchmakingStatus, store.estimatedWaitTime, handleFindMatch, handle2v2Click, handleBotClick]
+    ], [handle2v2Click, handleBotClick]
   );
 
   return (
@@ -174,42 +155,7 @@ export default function Home() {
             <p className="text-sm md:text-base text-white/60">Bluff • Strategy • Psychology</p>
           </header>
 
-          {store.matchmakingStatus === 'searching' && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-              <div className="glass-panel p-8 text-center max-w-md mx-auto">
-                <div className="flex items-center justify-center gap-3 mb-4">
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-yellow-400"></div>
-                  <h3 className="text-lg font-semibold text-yellow-400">Searching for Opponent</h3>
-                </div>
-                <p className="text-white/70 mb-6">
-                  {store.estimatedWaitTime
-                    ? `Estimated wait time: ~${store.estimatedWaitTime} seconds`
-                    : "Looking for another player to join your game..."
-                  }
-                </p>
-                <button
-                  onClick={() => store.cancelMatchmaking()}
-                  className="px-6 py-3 rounded-lg bg-red-600 hover:bg-red-500 transition text-white font-semibold shadow-lg"
-                >
-                  Cancel Search
-                </button>
-              </div>
-            </div>
-          )}
-
-          {store.matchmakingStatus === 'found' && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-              <div className="glass-panel p-8 text-center max-w-md mx-auto">
-                <div className="flex items-center justify-center gap-3 mb-4">
-                  <div className="text-green-400 text-2xl">✅</div>
-                  <h3 className="text-lg font-semibold text-green-400">Match Found!</h3>
-                </div>
-                <p className="text-white/70 mb-6">
-                  Opponent found! Starting game...
-                </p>
-              </div>
-            </div>
-          )}
+          {/* Removed 1v1 realtime matchmaking overlays - only 2v2 has matchmaking now */}
 
           <section className="max-w-4xl mx-auto glass-panel p-4 md:p-5 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -233,12 +179,12 @@ export default function Home() {
             </div>
           </section>
 
-          <section className="max-w-5xl mx-auto mt-8 grid grid-cols-3 gap-5">
+          <section className="max-w-5xl mx-auto mt-8 grid grid-cols-2 lg:grid-cols-3 gap-5">
             {tiles.map((tile) => (
               <button
                 key={tile.key}
                 onClick={tile.onClick}
-                disabled={tile.key === "realtime" && !connected}
+                disabled={false}
                 className="group text-left glass-panel p-5 hover:-translate-y-0.5 transition transform"
               >
                 <div className={`h-12 w-12 rounded-xl bg-gradient-to-br ${tile.gradient} grid place-items-center text-xl shadow-lg`}>

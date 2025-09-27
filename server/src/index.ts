@@ -250,34 +250,31 @@ io.on('connection', (socket) => {
         });
       }
     } else {
-      // 1v1 immediate match check (existing logic)
-      const match = gameManager.findMatch(gameMode || 'bot1v1', betAmount);
-      if (match && match.length >= 1) {
-        console.log(`${gameMode === 'bot1v1' ? 'Bot' : '1v1'} match found immediately for player ${playerId}`);
-        const matchResult = gameManager.createMatchFromQueue(match, betAmount);
+      // Bot 1v1 mode - create room immediately
+      if (gameMode === 'bot1v1') {
+        console.log(`Creating bot1v1 room for player ${playerId}`);
+        const matchResult = gameManager.createMatchFromQueue([{
+          playerId,
+          gameMode: 'bot1v1',
+          playerName: playerName || 'Player',
+          timestamp: new Date(),
+          botConfig: botConfig || { botStrategyId: 'simple', difficulty: 'easy' }
+        }], betAmount);
+        
         if (matchResult.success && matchResult.data) {
           const room = matchResult.data;
-
-          // Join all matched players to socket room
-          match.forEach(player => {
-            const playerSocket = io.sockets.sockets.get(player.playerId);
-            if (playerSocket) {
-              playerSocket.join(room.id);
-            }
-          });
-
+          socket.join(room.id);
+          
           io.to(room.id).emit('matchFound', {
             room,
-            message: `${gameMode === '2v2' ? '2v2' : 'Bot 1v1'} match found! Game starting soon...`
+            message: 'Bot match found! Game starting soon...'
           });
 
           setTimeout(() => {
             const startResult = gameManager.startGame(room.id);
             if (startResult.success) {
               const startedRoom = gameManager.getRoom(room.id)!;
-              if (startedRoom.gameMode === 'bot1v1') {
-                maybeScheduleBotMove(startedRoom.id);
-              }
+              maybeScheduleBotMove(startedRoom.id);
               startedRoom.players.forEach((p) => {
                 const ps = io.sockets.sockets.get(p.id);
                 if (ps && startedRoom.gameState) {
@@ -305,16 +302,6 @@ io.on('connection', (socket) => {
             }
           }, 1000);
         }
-      } else {
-        // Send queue status for 1v1
-        const queueLength = gameManager.getMatchmakingQueue().filter(req => req.gameMode === 'bot1v1').length;
-        const estimatedWaitTime = Math.max(10, Math.min(120, 30 * (2 - queueLength)));
-        socket.emit('matchmakingStatus', {
-          status: 'searching',
-          message: 'Looking for an opponent...',
-          estimatedWaitTime,
-          playersInQueue: queueLength
-        });
       }
     }
   });
@@ -664,39 +651,27 @@ setInterval(() => {
     }, 500);
   });
 
-  // Send status updates to waiting players
+  // Send status updates to waiting 2v2 players only
   const queue = gameManager.getMatchmakingQueue();
-  const waitingPlayers = queue.filter(req => {
+  const waiting2v2Players = queue.filter(req => {
     const waitTime = Math.floor((Date.now() - req.timestamp.getTime()) / 1000);
-    return waitTime > 5; // Only send updates after 5 seconds
+    return waitTime > 5 && req.gameMode === '2v2'; // Only send updates after 5 seconds for 2v2
   });
 
-  console.log(`Sending status updates to ${waitingPlayers.length} waiting players`);
+  console.log(`Sending status updates to ${waiting2v2Players.length} waiting 2v2 players`);
 
-  waitingPlayers.forEach(waitingPlayer => {
+  waiting2v2Players.forEach(waitingPlayer => {
     const waitTime = Math.floor((Date.now() - waitingPlayer.timestamp.getTime()) / 1000);
     const socket = io.sockets.sockets.get(waitingPlayer.playerId);
     if (socket) {
-      if (waitingPlayer.gameMode === '2v2') {
-        const queueStatus = gameManager.get2v2QueueStatus(300);
-        socket.emit('matchmakingStatus', {
-          status: 'searching',
-          message: `Still searching for ${waitingPlayer.teamMode === 'solo' ? 'players' : 'team opponents'}...`,
-          estimatedWaitTime: queueStatus.estimatedWaitTime,
-          playersInQueue: queueStatus.playersInQueue,
-          waitTime
-        });
-      } else {
-        const queueLength = queue.filter(req => req.gameMode === 'bot1v1').length;
-        const estimatedWaitTime = Math.max(5, 45 - waitTime);
-        socket.emit('matchmakingStatus', {
-          status: 'searching',
-          message: 'Still searching for an opponent...',
-          estimatedWaitTime,
-          playersInQueue: queueLength,
-          waitTime
-        });
-      }
+      const queueStatus = gameManager.get2v2QueueStatus(300);
+      socket.emit('matchmakingStatus', {
+        status: 'searching',
+        message: `Still searching for ${waitingPlayer.teamMode === 'solo' ? 'players' : 'team opponents'}...`,
+        estimatedWaitTime: queueStatus.estimatedWaitTime,
+        playersInQueue: queueStatus.playersInQueue,
+        waitTime
+      });
     }
   });
 }, 3000);
