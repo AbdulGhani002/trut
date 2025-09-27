@@ -1,17 +1,18 @@
 import { v4 as uuidv4 } from 'uuid';
-import { GameRoom, Player, GameResult } from '../../../shared/types/game';
+import { GameRoom, Player, GameResult, GameMode, BotRoomConfig } from '../../../shared/types/game';
 
 export class RoomManager {
   private rooms: Map<string, GameRoom> = new Map();
   private playerToRoom: Map<string, string> = new Map();
 
   createRoom(
-    hostId: string, 
-    hostName: string, 
-    gameMode: '1v1' | '2v2', 
+    hostId: string,
+    hostName: string,
+    gameMode: GameMode,
     maxPlayers?: number,
     betAmount?: number,
-    teamMode?: 'solo' | 'team'
+    teamMode?: 'solo' | 'team',
+    botConfig?: BotRoomConfig
   ): GameRoom {
     const roomId = uuidv4();
     const actualMaxPlayers = maxPlayers || (gameMode === '2v2' ? 4 : 2);
@@ -23,7 +24,7 @@ export class RoomManager {
       isConnected: true,
       socketId: hostId,
       joinedAt: new Date(),
-      team: gameMode === '2v2' ? 'team1' : undefined, // Host starts in team1 for 2v2
+      team: gameMode === '2v2' ? 'team1' : 'team1',
     };
 
     const room: GameRoom = {
@@ -37,7 +38,41 @@ export class RoomManager {
       betAmount: gameMode === '2v2' ? betAmount : undefined,
       teamMode: gameMode === '2v2' ? teamMode : undefined,
       prizePool: gameMode === '2v2' && betAmount ? betAmount * 4 : undefined,
+      isBotRoom: gameMode === 'bot1v1',
+      botConfig: botConfig,
     };
+
+    if (gameMode === 'bot1v1') {
+      const botPlayer: Player = {
+        id: botConfig?.botStrategyId ? `bot-${botConfig.botStrategyId}-${roomId}` : `bot-${roomId}`,
+        name: botConfig?.displayName || 'Trut Bot',
+        isReady: true,
+        isConnected: true,
+        socketId: `bot-${roomId}`,
+        joinedAt: new Date(),
+        team: 'team2',
+        isBot: true,
+        botProfile: botConfig
+          ? {
+              strategyId: botConfig.botStrategyId,
+              difficulty: botConfig.difficulty,
+              displayName: botConfig.displayName || 'Trut Bot',
+            }
+          : {
+              strategyId: 'simple',
+              difficulty: 'easy',
+              displayName: 'Trut Bot',
+            },
+      };
+
+      host.team = 'team1';
+      host.isReady = true;
+
+      room.players.push(botPlayer);
+      room.maxPlayers = 2;
+
+      this.playerToRoom.set(botPlayer.id, roomId);
+    }
 
     this.rooms.set(roomId, room);
     this.playerToRoom.set(hostId, roomId);
@@ -48,6 +83,9 @@ export class RoomManager {
   joinRoom(roomId: string, playerId: string, playerName: string, preferredTeam?: 'team1' | 'team2'): GameResult<GameRoom> {
     const room = this.rooms.get(roomId);
     if (!room) return { success: false, error: 'Room not found' };
+    if (room.gameMode === 'bot1v1') {
+      return { success: false, error: 'Cannot join bot-only room' };
+    }
     if (room.players.length >= room.maxPlayers) return { success: false, error: 'Room is full' };
     if (room.status !== 'waiting') return { success: false, error: 'Game already in progress' };
 

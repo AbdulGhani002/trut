@@ -19,6 +19,16 @@ export interface TeamScores {
   team2: { truts: number; cannets: number };
 }
 
+export type GameMode = 'bot1v1' | '2v2';
+
+export type BotDifficulty = 'easy' | 'normal' | 'hard';
+
+export interface BotProfile {
+  strategyId: string;
+  difficulty: BotDifficulty;
+  displayName: string;
+}
+
 export interface Player {
   id: string;
   name: string;
@@ -27,6 +37,14 @@ export interface Player {
   socketId: string;
   joinedAt: Date;
   team?: 'team1' | 'team2'; // For 2v2 mode
+  isBot?: boolean;
+  botProfile?: BotProfile;
+}
+
+export interface BotRoomConfig {
+  botStrategyId: string;
+  difficulty: BotDifficulty;
+  displayName?: string;
 }
 
 export interface GameRoom {
@@ -34,13 +52,15 @@ export interface GameRoom {
   hostId: string;
   players: Player[];
   maxPlayers: number;
-  gameMode: '1v1' | '2v2';
+  gameMode: GameMode;
   status: GameStatus;
   createdAt: Date;
   gameState?: TrutGameState;
   betAmount?: number; // For 2v2 mode
   teamMode?: 'solo' | 'team'; // For 2v2 mode
   prizePool?: number; // For 2v2 mode
+  isBotRoom?: boolean;
+  botConfig?: BotRoomConfig;
 }
 
 export interface TrutGameState {
@@ -73,17 +93,23 @@ export interface TrutGameState {
   brellanPlayer?: string; // Who declared brelan
   isFortialing?: boolean; // Special Fortial phase (6 truts + 2 cannets)
   fortialer?: string; // Player who can look at cards first in Fortial
+  mode: GameMode;
+  botState?: {
+    enabled: boolean;
+    lastActionAt?: Date;
+  };
 }
 
 export interface MatchmakingRequest {
   playerId: string;
-  gameMode: '1v1' | '2v2';
+  gameMode: GameMode;
   playerName?: string;
   skillLevel?: number;
   timestamp: Date;
   betAmount?: number; // For 2v2 mode
   teamMode?: 'solo' | 'team'; // For 2v2 mode
   teamMateId?: string; // For team mode
+  botConfig?: BotRoomConfig;
 }
 
 export interface GameEvent {
@@ -97,4 +123,5 @@ export interface GameResult<T> {
   success: boolean;
   data?: T;
   error?: string;
+  meta?: Record<string, any>;
 }

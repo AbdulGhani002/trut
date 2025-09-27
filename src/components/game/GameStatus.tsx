@@ -8,10 +8,16 @@ interface GameStatusProps {
   players: Player[];
   myTeam: 'team1' | 'team2';
   isMyTurn: boolean;
+  lastChallengeMessage?: string | null;
 }
 
-export default function GameStatus({ gameState, myPlayerId, players, myTeam, isMyTurn }: GameStatusProps) {
+export default function GameStatus({ gameState, myPlayerId, players, myTeam, isMyTurn, lastChallengeMessage }: GameStatusProps) {
   const getStatusMessage = () => {
+    // Show challenge message if available (highest priority)
+    if (lastChallengeMessage) {
+      return lastChallengeMessage;
+    }
+    
     if (gameState.awaitingChallengeResponse) {
       const trutingPlayerName = players.find(p => p.id === gameState.trutingPlayer)?.name || 'Player';
       if (gameState.challengeRespondent === myPlayerId) {
@@ -22,7 +28,11 @@ export default function GameStatus({ gameState, myPlayerId, players, myTeam, isM
     }
     
     if (gameState.phase === 'truting') {
-      return 'Truting Phase - High Stakes!';
+      if (gameState.challengeAccepted) {
+        return 'Challenge Accepted! Playing for Long Point!';
+      } else {
+        return 'Challenge Folded! Starting new round...';
+      }
     }
     
     if (gameState.gameEnded) {

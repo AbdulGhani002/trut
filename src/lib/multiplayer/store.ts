@@ -23,6 +23,9 @@ interface MultiplayerStore {
   unreadMessageCount: number;
   matchmakingStatus: 'idle' | 'searching' | 'found' | 'cancelled';
   estimatedWaitTime: number | null;
+  currentMode: 'bot1v1' | null;
+  botOpponent: { id: string; isBot: boolean } | null;
+  lastChallengeMessage: string | null;
 
   connect: () => Promise<void>;
   disconnect: () => void;
@@ -30,6 +33,7 @@ interface MultiplayerStore {
   startMatchmaking: (request: MatchmakingRequest) => void;
   cancelMatchmaking: () => void;
   leaveGame: () => boolean;
+  joinBotMatch: () => void;
 
   sendChatMessage: (message: string) => void;
   playCard: (cardId: string) => void;
@@ -62,7 +66,8 @@ interface SocketEventData {
   challengeResponse: { 
     playerId: string;
     accept: boolean; 
-    gameState?: TrutGameState; 
+    gameState?: TrutGameState;
+    message?: string;
   };
   rottenTrick: {
     trickCards: Card[];
@@ -99,6 +104,9 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
   unreadMessageCount: 0,
   matchmakingStatus: 'idle',
   estimatedWaitTime: null,
+  currentMode: null,
+  botOpponent: null,
+  lastChallengeMessage: null,
 
   connect: async () => {
     const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'], timeout: 10000 });
@@ -120,6 +128,15 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
       console.log('Match found event received:', data);
       set({ currentRoom: data.room, matchmakingStatus: 'found', estimatedWaitTime: null });
     });
+    socket.on('botMatchReady', (data: { room: GameRoom; gameState?: TrutGameState }) => {
+      set({
+        currentRoom: data.room,
+        gameState: data.gameState || null,
+        matchmakingStatus: 'idle',
+        currentMode: 'bot1v1',
+        botOpponent: data.room.players.find((p) => p.isBot) ? { id: data.room.players.find((p) => p.isBot)!.id, isBot: true } : null,
+      });
+    });
     socket.on('matchmakingStatus', (data: SocketEventData['matchmakingStatus']) => {
       console.log('Matchmaking status update:', data);
       set({
@@ -132,11 +149,13 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
     });
     socket.on('gameStart', (data: SocketEventData['gameStart']) => {
       // Use server state as single source of truth - no optimistic updates
-      set({ 
-        currentRoom: data.room || get().currentRoom, 
-        gameState: data.gameState || null, 
-        matchmakingStatus: 'idle', 
-        estimatedWaitTime: null 
+      set({
+        currentRoom: data.room || get().currentRoom,
+        gameState: data.gameState || null,
+        matchmakingStatus: 'idle',
+        estimatedWaitTime: null,
+        currentMode: data.room?.gameMode === 'bot1v1' ? 'bot1v1' : get().currentMode,
+        botOpponent: data.room?.players.find((p) => p.isBot) ? { id: data.room.players.find((p) => p.isBot)!.id, isBot: true } : null,
       });
     });
     socket.on('cardPlayed', (data: SocketEventData['cardPlayed']) => {
@@ -149,12 +168,18 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
     });
     socket.on('challengeResponse', (data: SocketEventData['challengeResponse']) => {
       // Use server state as single source of truth - no optimistic updates
-      set({ gameState: data.gameState || get().gameState });
+      set({ 
+        gameState: data.gameState || get().gameState,
+        lastChallengeMessage: data.message || null
+      });
     });
     socket.on('newRound', (data: SocketEventData['newRound']) => {
       console.log('New round started:', data);
       // Use server state as single source of truth - no optimistic updates
-      set({ gameState: data.gameState || get().gameState });
+      set({ 
+        gameState: data.gameState || get().gameState,
+        lastChallengeMessage: null // Clear challenge message on new round
+      });
     });
     // Add new 2v2 event handlers
     socket.on('brellanCalled', (data: SocketEventData['brellanCalled']) => {
@@ -199,9 +224,28 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
       playerName: name,
       betAmount: request.betAmount,
       teamMode: request.teamMode,
-      teamMateId: request.teamMateId
+      teamMateId: request.teamMateId,
+      botConfig: request.botConfig,
     });
     console.log('Matchmaking start event emitted');
+  },
+
+  joinBotMatch: () => {
+    const { socket } = get();
+    if (!socket) {
+      console.warn('Cannot join bot match: no socket connection');
+      return;
+    }
+    const playerName = get().playerName || 'Guest';
+    const playerId = get().myPlayerId || socket.id;
+    set({ matchmakingStatus: 'searching', currentMode: 'bot1v1' });
+    
+    // Use the regular matchmaking system for bot games
+    socket.emit('startMatchmaking', {
+      gameMode: 'bot1v1',
+      playerName,
+      botConfig: { botStrategyId: 'simple', difficulty: 'easy' },
+    });
   },
 
   cancelMatchmaking: () => {
@@ -223,12 +267,21 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
     try {
       socket.emit('leaveRoom');
       // Optimistically clean up local state immediately for better UX
-      set({ currentRoom: null, gameState: null, chatMessages: [], unreadMessageCount: 0, matchmakingStatus: 'idle', estimatedWaitTime: null });
+      set({
+        currentRoom: null,
+        gameState: null,
+        chatMessages: [],
+        unreadMessageCount: 0,
+        matchmakingStatus: 'idle',
+        estimatedWaitTime: null,
+        currentMode: null,
+        botOpponent: null,
+      });
       return true;
     } catch (error) {
       console.error('Failed to emit leaveRoom:', error);
       // Still clean up local state as fallback
-      set({ currentRoom: null, gameState: null, chatMessages: [], unreadMessageCount: 0, matchmakingStatus: 'idle', estimatedWaitTime: null });
+      set({ currentRoom: null, gameState: null, chatMessages: [], unreadMessageCount: 0, matchmakingStatus: 'idle', estimatedWaitTime: null, currentMode: null, botOpponent: null });
       return false;
     }
   },

@@ -1,17 +1,17 @@
-import { MatchmakingRequest } from '../../../shared/types/game';
+import { MatchmakingRequest, GameMode, BotRoomConfig } from '../../../shared/types/game';
 
 export class MatchmakingService {
-  // Split queues to isolate modes
-  private queue1v1: MatchmakingRequest[] = [];
+  private queue: MatchmakingRequest[] = []; // General queue for bot games and other modes
   private queue2v2: MatchmakingRequest[] = [];
 
   addToQueue(
     playerId: string, 
-    gameMode: '1v1' | '2v2', 
+    gameMode: GameMode, 
     playerName?: string,
     betAmount?: number,
     teamMode?: 'solo' | 'team',
-    teamMateId?: string
+    teamMateId?: string,
+    botConfig?: BotRoomConfig
   ): MatchmakingRequest {
     // Validate bet amount
     if (betAmount !== undefined && betAmount < 0) {
@@ -19,27 +19,33 @@ export class MatchmakingService {
     }
 
     // Validate team consistency
-    if (teamMode === 'team' && !teamMateId) {
+    if (gameMode === '2v2' && teamMode === 'team' && !teamMateId) {
       throw new Error('Team mode requires a teammate ID');
     }
-    if (teamMateId && teamMode !== 'team') {
+    if (gameMode === '2v2' && teamMateId && teamMode !== 'team') {
       throw new Error('Teammate ID provided but not in team mode');
+    }
+    if (gameMode === 'bot1v1' && !botConfig) {
+      throw new Error('Bot config required for bot mode');
     }
     // Ensure player is not in any queue already (reconnects, reloads, etc.)
     this.removeFromQueue(playerId);
-    const request: MatchmakingRequest = { 
-      playerId, 
-      gameMode, 
-      playerName, 
+    const request: MatchmakingRequest = {
+      playerId,
+      gameMode,
+      playerName,
       timestamp: new Date(),
       betAmount,
       teamMode,
-      teamMateId
+      teamMateId,
+      botConfig
     };
-    if (gameMode === '1v1') {
-      this.queue1v1.push(request);
-    } else {
+    if (gameMode === '2v2') {
       this.queue2v2.push(request);
+    } else if (gameMode === 'bot1v1') {
+      this.queue.push(request);
+    } else {
+      console.warn(`Matchmaking requested for ${gameMode}, which does not use queues. Returning request only.`);
     }
     console.log(
       `Player ${playerName || playerId} added to matchmaking queue for ${gameMode}` +
@@ -47,14 +53,9 @@ export class MatchmakingService {
       `${teamMode ? ` (mode: ${teamMode})` : ''}`
     );
     
-    // Debug: Show current queue state for the relevant mode
     if (gameMode === '2v2') {
       console.log(`2v2 Queue now has ${this.queue2v2.length} players:`,
         this.queue2v2.map(req => `${req.playerName || req.playerId}(bet:${req.betAmount ?? 'n/a'},mode:${req.teamMode})`).join(', ')
-      );
-    } else {
-      console.log(`1v1 Queue now has ${this.queue1v1.length} players:`,
-        this.queue1v1.map(req => `${req.playerName || req.playerId}`).join(', ')
       );
     }
     
@@ -62,27 +63,31 @@ export class MatchmakingService {
   }
 
   removeFromQueue(playerId: string): boolean {
-    const initialTotal = this.queue1v1.length + this.queue2v2.length;
-    this.queue1v1 = this.queue1v1.filter(req => req.playerId !== playerId);
+    const initialTotal2v2 = this.queue2v2.length;
+    const initialTotal = this.queue.length;
     this.queue2v2 = this.queue2v2.filter(req => req.playerId !== playerId);
-    return (this.queue1v1.length + this.queue2v2.length) < initialTotal;
+    this.queue = this.queue.filter(req => req.playerId !== playerId);
+    return this.queue2v2.length < initialTotal2v2 || this.queue.length < initialTotal;
   }
 
-  findMatch(gameMode: '1v1' | '2v2', betAmount?: number): MatchmakingRequest[] | null {
-    if (gameMode === '1v1') {
-      return this.find1v1Match();
-    } else {
+  findMatch(gameMode: GameMode, betAmount?: number): MatchmakingRequest[] | null {
+    if (gameMode === '2v2') {
       return this.find2v2Match(betAmount);
     }
+    if (gameMode === 'bot1v1') {
+      return this.findBotMatch();
+    }
+    return null;
   }
 
-  private find1v1Match(): MatchmakingRequest[] | null {
-    if (this.queue1v1.length >= 2) {
-      const matched = this.queue1v1.slice(0, 2);
-      // consume matched
+  private findBotMatch(): MatchmakingRequest[] | null {
+    // For bot games, immediately match any player in the queue
+    const botQueue = this.queue.filter(req => req.gameMode === 'bot1v1');
+    if (botQueue.length > 0) {
+      const matched = botQueue.slice(0, 1); // Take first player
       const matchedIds = new Set(matched.map(m => m.playerId));
-      this.queue1v1 = this.queue1v1.filter(r => !matchedIds.has(r.playerId));
-      console.log(`1v1 Match found: ${matched.map(m => m.playerId).join(' vs ')}`);
+      this.queue = this.queue.filter(r => !matchedIds.has(r.playerId));
+      console.log(`Bot match found: ${matched.length} player matched`);
       return matched;
     }
     return null;
@@ -107,11 +112,13 @@ export class MatchmakingService {
   }
 
   getQueue(): MatchmakingRequest[] {
-    return [...this.queue1v1, ...this.queue2v2];
+    return [...this.queue, ...this.queue2v2];
   }
 
-  getQueueByMode(gameMode: '1v1' | '2v2'): MatchmakingRequest[] {
-    return gameMode === '1v1' ? [...this.queue1v1] : [...this.queue2v2];
+  getQueueByMode(gameMode: GameMode): MatchmakingRequest[] {
+    if (gameMode === '2v2') return [...this.queue2v2];
+    if (gameMode === 'bot1v1') return [...this.queue];
+    return [];
   }
 
   // 2v2 specific methods
@@ -121,15 +128,13 @@ export class MatchmakingService {
     return this.queue2v2.filter(req => req.teamMode === 'solo');
   }
 
-  getEstimatedWaitTime(gameMode: '1v1' | '2v2', betAmount?: number): number {
-    if (gameMode === '1v1') {
-      const queue = this.queue1v1;
-      return queue.length >= 1 ? 30 : 120; // Seconds
-    } else {
-      const queue = this.get2v2QueueByBetAmount(300); // Fixed bet amount for 2v2
+  getEstimatedWaitTime(gameMode: GameMode, betAmount?: number): number {
+    if (gameMode === '2v2') {
+      const queue = this.get2v2QueueByBetAmount(300);
       const playersNeeded = 4 - queue.length;
-      return playersNeeded <= 0 ? 10 : playersNeeded * 45; // Seconds per player needed
+      return playersNeeded <= 0 ? 10 : playersNeeded * 45;
     }
+    return 0;
   }
 
   canCreateTeamMatch(teamRequests: MatchmakingRequest[]): boolean {
@@ -181,18 +186,18 @@ export class MatchmakingService {
   }
 
   // Check all possible matches periodically
-  checkForMatches(): { gameMode: '1v1' | '2v2'; matches: MatchmakingRequest[]; betAmount?: number }[] {
-    const foundMatches: { gameMode: '1v1' | '2v2'; matches: MatchmakingRequest[]; betAmount?: number }[] = [];
+  checkForMatches(): { gameMode: GameMode; matches: MatchmakingRequest[]; betAmount?: number }[] {
+    const foundMatches: { gameMode: GameMode; matches: MatchmakingRequest[]; betAmount?: number }[] = [];
 
-    // Check 1v1
-    const match1v1 = this.find1v1Match();
-    if (match1v1) {
-      foundMatches.push({ gameMode: '1v1', matches: match1v1 });
+    // Check for bot games first (immediate match)
+    const botMatch = this.findBotMatch();
+    if (botMatch) {
+      console.log(`✅ Found bot match with ${botMatch.length} player`);
+      foundMatches.push({ gameMode: 'bot1v1', matches: botMatch });
     }
 
-    // Check 2v2 - all games use fixed bet amount of 300
     const has2v2Players = this.queue2v2.length > 0;
-    console.log(`Periodic check: Has 2v2 players: ${has2v2Players}, 1v1 queue: ${this.queue1v1.length}, 2v2 queue: ${this.queue2v2.length}`);
+    console.log(`Periodic check: Has 2v2 players: ${has2v2Players}, 2v2 queue: ${this.queue2v2.length}`);
     if (has2v2Players) {
       const FIXED_2V2_BET = 300;
       

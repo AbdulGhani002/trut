@@ -1,4 +1,4 @@
-import { GameRoom, TrutGameState, Card, TeamScores } from './game';
+import { GameRoom, TrutGameState, Card, TeamScores, GameMode } from './game';
 
 export interface ServerToClientEvents {
   connected: (data: { message: string; playerId: string; timestamp: Date }) => void;
@@ -68,7 +68,7 @@ export interface ServerToClientEvents {
 }
 
 export interface ClientToServerEvents {
-  startMatchmaking: (data: { gameMode: '1v1' | '2v2'; playerName: string; betAmount?: number; teamMode?: 'solo' | 'team'; teamMateId?: string }) => void;
+  startMatchmaking: (data: { gameMode: GameMode; playerName: string; betAmount?: number; teamMode?: 'solo' | 'team'; teamMateId?: string }) => void;
   cancelMatchmaking: () => void;
   setReady: (isReady: boolean) => void;
   playCard: (data: { cardId: string; cardData: Card }) => void;

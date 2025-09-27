@@ -60,7 +60,7 @@ export default function Home() {
     setTokens((t) => Math.max(0, t - 100));
     store.startMatchmaking({
       playerId: store.myPlayerId || 'temp-player-id',
-      gameMode: "1v1",
+      gameMode: "bot1v1",
       timestamp: new Date()
     });
   }, [connected, store]);
@@ -73,6 +73,11 @@ export default function Home() {
     // Go directly to 2v2 matchmaking with solo queue (auto-assign teams)
     router.push('/game/2v2?teamMode=solo');
   }, [connected, router]);
+
+  const handleBotClick = useCallback(() => {
+    // Go directly to bot game page - it will handle connection internally
+    router.push('/game/bot1v1');
+  }, [router]);
 
   const handleLogout = useCallback(async () => {
     try {
@@ -104,7 +109,7 @@ export default function Home() {
         subtitle: "1v1 • 100 tokens",
         emoji: "⚡",
         gradient: "from-slate-800 to-slate-700",
-        onClick: () => alert("Bot mode coming soon"),
+        onClick: handleBotClick,
       },
       {
         key: "realtime",
@@ -157,7 +162,7 @@ export default function Home() {
         gradient: "from-blue-600 to-indigo-600",
         onClick: () => alert("Statistics coming soon"),
       },
-    ], [connected, store.matchmakingStatus, store.estimatedWaitTime, handleFindMatch, handle2v2Click]
+    ], [connected, store.matchmakingStatus, store.estimatedWaitTime, handleFindMatch, handle2v2Click, handleBotClick]
   );
 
   return (

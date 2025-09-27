@@ -24,6 +24,120 @@ app.use(express.json());
 
 const gameManager = new GameManager();
 
+// Helper: if it's the bot's turn in a bot1v1 room, auto-play a card
+const maybeScheduleBotMove = (roomId: string) => {
+  const room = gameManager.getRoom(roomId);
+  if (!room || room.gameMode !== 'bot1v1' || !room.gameState) return;
+  const bot = room.players.find(p => p.isBot);
+  if (!bot) return;
+  if (room.gameState.gameEnded) return;
+  if (room.gameState.currentPlayer !== bot.id) return;
+
+  // Phase 1: after a short delay, emit a preview state showing the bot's card on table
+  setTimeout(() => {
+    const currentRoom = gameManager.getRoom(roomId);
+    if (!currentRoom || !currentRoom.gameState) return;
+    if (currentRoom.gameState.currentPlayer !== bot.id) return;
+    const botHand = currentRoom.gameState.hands[bot.id] || [];
+    if (botHand.length === 0) return;
+    const cardToPlay = botHand[0];
+
+    // Emit preview with the card visible on table before resolution
+    const previewState = {
+      ...currentRoom.gameState,
+      currentTrick: [
+        ...(currentRoom.gameState.currentTrick || []),
+        { playerId: bot.id, card: cardToPlay }
+      ],
+      hands: {
+        ...currentRoom.gameState.hands,
+        [bot.id]: (currentRoom.gameState.hands[bot.id] || []).filter(c => c.id !== cardToPlay.id)
+      }
+    } as any;
+
+    io.to(currentRoom.id).emit('cardPlayed', {
+      playerId: bot.id,
+      cardId: cardToPlay.id,
+      cardData: cardToPlay,
+      gameState: previewState,
+      nextPlayer: currentRoom.gameState.currentPlayer
+    });
+
+    // Phase 2: after 1.2s, actually process the move (evaluates trick, advances turn)
+    setTimeout(() => {
+      const latestRoom = gameManager.getRoom(roomId);
+      if (!latestRoom || !latestRoom.gameState) return;
+      // If state already advanced, skip
+      if (latestRoom.gameState.currentPlayer !== bot.id) return;
+
+      const event: GameEvent = {
+        type: 'card_played',
+        playerId: bot.id,
+        data: { cardId: cardToPlay.id, cardData: cardToPlay },
+        timestamp: new Date()
+      } as any;
+
+      const result = gameManager.processGameEvent(bot.id, event);
+      if (result.success && result.data && result.data.gameState) {
+        const updated = result.data;
+        io.to(updated.id).emit('cardPlayed', {
+          playerId: bot.id,
+          cardId: cardToPlay.id,
+          cardData: cardToPlay,
+          gameState: updated.gameState!,
+          nextPlayer: updated.gameState!.currentPlayer
+        });
+
+        const roomAfter = updated;
+        if (roomAfter.gameState?.newRoundStarted) {
+          roomAfter.gameState.newRoundStarted = false;
+          setTimeout(() => {
+            const r = gameManager.getRoom(roomAfter.id);
+            if (r && r.gameState) {
+              if (r.gameState.gameEnded) {
+                io.to(r.id).emit('gameEnded', {
+                  gameState: r.gameState,
+                  winner: r.gameState.winner,
+                  message: 'Game finished!'
+                });
+              } else {
+                r.players.forEach((p) => {
+                  const ps = io.sockets.sockets.get(p.id);
+                  if (ps) {
+                    const sanitized = {
+                      ...r,
+                      gameState: {
+                        ...r.gameState!,
+                        hands: {
+                          [p.id]: r.gameState!.hands[p.id] || [],
+                          ...Object.fromEntries(
+                            r.players
+                              .filter(x => x.id !== p.id)
+                              .map(x => [x.id, (r.gameState!.hands[x.id] || []).length])
+                          )
+                        }
+                      }
+                    } as any;
+                    ps.emit('newRound', {
+                      room: sanitized,
+                      gameState: sanitized.gameState,
+                      message: 'New round started!',
+                      scores: r.gameState!.scores
+                    });
+                  }
+                });
+                maybeScheduleBotMove(r.id);
+              }
+            }
+          }, 200);
+        } else {
+          maybeScheduleBotMove(updated.id);
+        }
+      }
+    }, 1200);
+  }, 200);
+};
+
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
@@ -37,7 +151,7 @@ io.on('connection', (socket) => {
   console.log(`Player connected: ${socket.id}`);
 
   socket.on('startMatchmaking', (data) => {
-    const { gameMode, playerName, betAmount, teamMode, teamMateId } = data || {};
+    const { gameMode, playerName, betAmount, teamMode, teamMateId, botConfig } = data || {};
     const playerId = socket.id;
 
     console.log(`Player ${playerId} starting matchmaking for ${gameMode} (bet: ${betAmount}, mode: ${teamMode})`);
@@ -46,11 +160,12 @@ io.on('connection', (socket) => {
     try {
       gameManager.addToMatchmakingQueue(
         playerId,
-        gameMode || '1v1',
+        gameMode || 'bot1v1',
         playerName || 'Player',
         betAmount,
         teamMode,
-        teamMateId
+        teamMateId,
+        botConfig
       );
     } catch (err: any) {
       socket.emit('error', { message: err?.message || 'Invalid matchmaking request' });
@@ -88,7 +203,7 @@ io.on('connection', (socket) => {
 
           io.to(room.id).emit('matchFound', {
             room,
-            message: `${gm === '2v2' ? '2v2' : '1v1'} match found! Get ready to play!`
+            message: `${gm === '2v2' ? '2v2' : 'Bot 1v1'} match found! Get ready to play!`
           });
 
           setTimeout(() => {
@@ -97,6 +212,10 @@ io.on('connection', (socket) => {
             if (startResult.success) {
               const startedRoom = gameManager.getRoom(room.id)!;
               console.log(`(Immediate) Game started successfully in room ${room.id}, sending to ${startedRoom.players.length} players`);
+              // If bot1v1, schedule bot move when it's bot's turn
+              if (startedRoom.gameMode === 'bot1v1') {
+                maybeScheduleBotMove(startedRoom.id);
+              }
               startedRoom.players.forEach((p) => {
                 const ps = io.sockets.sockets.get(p.id);
                 if (ps && startedRoom.gameState) {
@@ -132,9 +251,9 @@ io.on('connection', (socket) => {
       }
     } else {
       // 1v1 immediate match check (existing logic)
-      const match = gameManager.findMatch(gameMode || '1v1', betAmount);
-      if (match && match.length >= 2) {
-        console.log(`1v1 match found immediately for player ${playerId}`);
+      const match = gameManager.findMatch(gameMode || 'bot1v1', betAmount);
+      if (match && match.length >= 1) {
+        console.log(`${gameMode === 'bot1v1' ? 'Bot' : '1v1'} match found immediately for player ${playerId}`);
         const matchResult = gameManager.createMatchFromQueue(match, betAmount);
         if (matchResult.success && matchResult.data) {
           const room = matchResult.data;
@@ -149,13 +268,16 @@ io.on('connection', (socket) => {
 
           io.to(room.id).emit('matchFound', {
             room,
-            message: `${gameMode === '2v2' ? '2v2' : '1v1'} match found! Game starting soon...`
+            message: `${gameMode === '2v2' ? '2v2' : 'Bot 1v1'} match found! Game starting soon...`
           });
 
           setTimeout(() => {
             const startResult = gameManager.startGame(room.id);
             if (startResult.success) {
               const startedRoom = gameManager.getRoom(room.id)!;
+              if (startedRoom.gameMode === 'bot1v1') {
+                maybeScheduleBotMove(startedRoom.id);
+              }
               startedRoom.players.forEach((p) => {
                 const ps = io.sockets.sockets.get(p.id);
                 if (ps && startedRoom.gameState) {
@@ -185,7 +307,7 @@ io.on('connection', (socket) => {
         }
       } else {
         // Send queue status for 1v1
-        const queueLength = gameManager.getMatchmakingQueue().filter(req => req.gameMode === '1v1').length;
+        const queueLength = gameManager.getMatchmakingQueue().filter(req => req.gameMode === 'bot1v1').length;
         const estimatedWaitTime = Math.max(10, Math.min(120, 30 * (2 - queueLength)));
         socket.emit('matchmakingStatus', {
           status: 'searching',
@@ -231,6 +353,12 @@ io.on('connection', (socket) => {
         gameState: result.data.gameState,
         nextPlayer: result.data.gameState?.currentPlayer
       });
+
+      // If bot game and it's now bot's turn, schedule bot move
+      const r = gameManager.getRoom(result.data.id);
+      if (r && r.gameMode === 'bot1v1') {
+        maybeScheduleBotMove(r.id);
+      }
 
       // Check if GameManager started a new round
       const room = result.data;
@@ -296,6 +424,33 @@ io.on('connection', (socket) => {
         gameState: result.data.gameState,
         message: 'TRUT called! Opponent must accept or fold.'
       });
+
+      // If this is a bot game, schedule bot's challenge response
+      const room = result.data;
+      if (room.gameMode === 'bot1v1' && room.gameState?.awaitingChallengeResponse) {
+        const bot = room.players.find(p => p.isBot);
+        if (bot && room.gameState.challengeRespondent === bot.id) {
+          setTimeout(() => {
+            // Bot always accepts challenges for now (can be made smarter later)
+            const botEvent: GameEvent = { 
+              type: 'challenge_response', 
+              playerId: bot.id, 
+              data: { accept: true }, 
+              timestamp: new Date() 
+            } as any;
+            
+            const botResult = gameManager.processGameEvent(bot.id, botEvent);
+            if (botResult.success && botResult.data) {
+              io.to(room.id).emit('challengeResponse', {
+                playerId: bot.id,
+                accept: true,
+                gameState: botResult.data.gameState,
+                message: 'Bot accepted the challenge! Playing for Long Point!'
+              });
+            }
+          }, 1500); // 1.5 second delay for bot to "think"
+        }
+      }
     } else {
       socket.emit('error', { message: result.error || 'Failed to call trut' });
     }
@@ -464,7 +619,7 @@ setInterval(() => {
 
     io.to(room.id).emit('matchFound', {
       room,
-      message: `${gameMode === '2v2' ? '2v2' : '1v1'} match found! Get ready to play!`
+      message: `${gameMode === '2v2' ? '2v2' : 'Bot 1v1'} match found! Get ready to play!`
     });
 
     setTimeout(() => {
@@ -473,6 +628,9 @@ setInterval(() => {
       if (startResult.success) {
         const startedRoom = gameManager.getRoom(room.id)!;
         console.log(`Game started successfully in room ${room.id}, sending to ${startedRoom.players.length} players`);
+        if (startedRoom.gameMode === 'bot1v1') {
+          maybeScheduleBotMove(startedRoom.id);
+        }
         startedRoom.players.forEach((p) => {
           const ps = io.sockets.sockets.get(p.id);
           if (ps && startedRoom.gameState) {
@@ -529,7 +687,7 @@ setInterval(() => {
           waitTime
         });
       } else {
-        const queueLength = queue.filter(req => req.gameMode === '1v1').length;
+        const queueLength = queue.filter(req => req.gameMode === 'bot1v1').length;
         const estimatedWaitTime = Math.max(5, 45 - waitTime);
         socket.emit('matchmakingStatus', {
           status: 'searching',

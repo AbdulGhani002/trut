@@ -7,7 +7,7 @@ import GameStatus from './GameStatus';
 import GameTable from './GameTable';
 import PlayerHand from './PlayerHand';
 import GameEndScreen from './GameEndScreen';
-import { Card } from '../../../shared/types/game';
+import { Card, Player } from '../../../shared/types/game';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
 export default function GameView() {
@@ -17,7 +17,7 @@ export default function GameView() {
   // Get players (memoized to prevent dependency issues) - must be before early return
   const players = useMemo(() => currentRoom?.players || [], [currentRoom?.players]);
   const myPlayer = useMemo(() => players.find(p => p.id === myPlayerId), [players, myPlayerId]);
-  const opponent = useMemo(() => players.find(p => p.id !== myPlayerId), [players, myPlayerId]);
+  const opponent = useMemo(() => players.find(p => p.id !== myPlayerId && !p.isBot), [players, myPlayerId]);
 
   // Determine teams and scores - must be before early return
   const { myTeam, opponentTeam, myScore, opponentScore, currentRoundTricks } = useMemo(() => {
