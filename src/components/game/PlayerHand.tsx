@@ -32,6 +32,27 @@ export default function PlayerHand({ myHand, gameState, myPlayerId, canPlay }: P
     if (socket) socket.emit('respondToChallenge', accept);
   };
 
+  // Check if current player should see challenge response buttons
+  const shouldShowChallengeButtons = () => {
+    if (!gameState?.awaitingChallengeResponse || !gameState?.trutingPlayer || !myPlayerId) {
+      return false;
+    }
+
+    // If it's 1v1 mode, only the single opponent sees buttons
+    if (gameState.challengeRespondent === myPlayerId) {
+      return true;
+    }
+
+    // For 2v2 mode, check if current player is an opponent of the truting player
+    // We need to determine teams from the game state or room data
+    // Since we don't have direct access to room data here, we'll use the challengeRespondents array
+    if (gameState.challengeRespondents && gameState.challengeRespondents.includes(myPlayerId)) {
+      return true;
+    }
+
+    return false;
+  };
+
   // Reset playing card state when game state changes
   React.useEffect(() => {
     setPlayingCardId(null);
@@ -73,8 +94,8 @@ export default function PlayerHand({ myHand, gameState, myPlayerId, canPlay }: P
 
       {/* Action Buttons */}
       <div className="flex justify-center gap-4">
-        {gameState.awaitingChallengeResponse && gameState.challengeRespondent === myPlayerId ? (
-          // Show challenge response buttons
+        {shouldShowChallengeButtons() ? (
+          // Show challenge response buttons to all opponents
           <>
             <button 
               onClick={() => handleChallengeResponse(true)}
