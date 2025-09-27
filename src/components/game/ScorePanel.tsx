@@ -12,6 +12,7 @@ interface ScorePanelProps {
     mine: number;
     opponent: number;
   };
+  players?: Player[]; // Add players array for team display
 }
 
 export default function ScorePanel({ 
@@ -20,7 +21,8 @@ export default function ScorePanel({
   opponent, 
   myTeam, 
   opponentTeam, 
-  currentRoundTricks 
+  currentRoundTricks,
+  players = []
 }: ScorePanelProps) {
   const myScore = scores[myTeam];
   const opponentScore = scores[opponentTeam];
@@ -30,11 +32,16 @@ export default function ScorePanel({
       <div className="bg-slate-800/40 backdrop-blur-sm rounded-2xl border border-white/10 p-4 sticky top-24">
         <h3 className="text-white font-bold text-lg mb-4 text-center">Game Score</h3>
         
-        {/* My Score */}
+        {/* My Team Score */}
         <div className="mb-6">
           <div className="flex items-center gap-2 mb-3">
             <div className="w-3 h-3 rounded-full bg-blue-400"></div>
-            <span className="text-white font-semibold">{myPlayer?.name || 'You'}</span>
+            <span className="text-white font-semibold">
+              {myTeam === 'team1' ? 'Team Alpha' : 'Team Beta'} (Your Team)
+            </span>
+          </div>
+          <div className="text-xs text-white/50 mb-2">
+            {players.filter(p => p.team === myTeam).map(p => p.name).join(' & ')}
           </div>
           
           <div className="space-y-2 text-sm">
@@ -60,11 +67,16 @@ export default function ScorePanel({
           <div className="h-px bg-white/20 flex-1"></div>
         </div>
 
-        {/* Opponent Score */}
+        {/* Opponent Team Score */}
         <div className="mb-6">
           <div className="flex items-center gap-2 mb-3">
             <div className="w-3 h-3 rounded-full bg-red-400"></div>
-            <span className="text-white font-semibold">{opponent?.name || 'Opponent'}</span>
+            <span className="text-white font-semibold">
+              {opponentTeam === 'team1' ? 'Team Alpha' : 'Team Beta'} (Opponents)
+            </span>
+          </div>
+          <div className="text-xs text-white/50 mb-2">
+            {players.filter(p => p.team === opponentTeam).map(p => p.name).join(' & ')}
           </div>
           
           <div className="space-y-2 text-sm">

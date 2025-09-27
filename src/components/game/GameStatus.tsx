@@ -18,37 +18,53 @@ export default function GameStatus({ gameState, myPlayerId, players, myTeam, isM
       return lastChallengeMessage;
     }
     
+    // Challenge response phase
     if (gameState.awaitingChallengeResponse) {
       const trutingPlayerName = players.find(p => p.id === gameState.trutingPlayer)?.name || 'Player';
+      const currentRespondentName = players.find(p => p.id === gameState.challengeRespondent)?.name || 'Player';
+      
       if (gameState.challengeRespondent === myPlayerId) {
-        return `${trutingPlayerName} called TRUT! Accept or Fold?`;
+        return `⚡ ${trutingPlayerName} called TRUT! Your decision: Accept or Fold?`;
+      } else if (gameState.challengeRespondents?.includes(myPlayerId || '')) {
+        return `⏳ Waiting for ${currentRespondentName} to respond to ${trutingPlayerName}'s TRUT...`;
       } else {
-        return `Waiting for challenge response...`;
+        return `⏳ ${trutingPlayerName} called TRUT! Waiting for opponents to respond...`;
       }
     }
     
+    // Challenge resolution phase
     if (gameState.phase === 'truting') {
       if (gameState.challengeAccepted) {
-        return 'Challenge Accepted! Playing for Long Point!';
+        return '✅ Challenge Accepted! Playing for Long Point!';
       } else {
-        return 'Challenge Folded! Starting new round...';
+        return '❌ Challenge Folded! Starting new round...';
       }
     }
     
+    // Game end
     if (gameState.gameEnded) {
       const winnerTeam = gameState.winner;
       const isMyTeam = (winnerTeam === 'team1' && myTeam === 'team1') || (winnerTeam === 'team2' && myTeam === 'team2');
-      return isMyTeam ? 'You Won the Game! 🎉' : 'Game Over - Opponent Won';
+      return isMyTeam ? '🎉 You Won the Game!' : '💀 Game Over - Opponent Won';
     }
     
+    // Normal gameplay
     if (isMyTurn) {
-      return gameState.phase === 'playing' ? 'Your Turn' : 'Your action required...';
+      return gameState.phase === 'playing' ? '🎯 Your Turn - Play a card' : '⚡ Your action required...';
     } else {
-      return 'Waiting for opponent...';
+      const currentPlayerName = players.find(p => p.id === gameState.currentPlayer)?.name || 'Player';
+      return `⏳ Waiting for ${currentPlayerName}...`;
     }
   };
 
   const getIndicatorColor = () => {
+    if (gameState.awaitingChallengeResponse) {
+      if (gameState.challengeRespondent === myPlayerId) {
+        return 'bg-yellow-400'; // Your turn to respond
+      } else {
+        return 'bg-orange-400'; // Waiting for others
+      }
+    }
     if (gameState.phase === 'truting') return 'bg-orange-400';
     if (isMyTurn) return 'bg-green-400';
     return 'bg-slate-400';

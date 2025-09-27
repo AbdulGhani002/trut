@@ -20,6 +20,8 @@ export default function GameTable2v2({ currentTrick, myPlayerId, players }: Game
   const otherPlayers = players.filter(p => p.id !== myPlayerId);
   
   // Arrange players: teammate opposite (top), opponents on sides
+  // With alternating seating: Team1, Team2, Team1, Team2
+  // Teammate is always opposite, opponents are on the sides
   const teammate = myPlayer ? otherPlayers.find(p => p.team === myPlayer.team) : null;
   const opponents = myPlayer ? otherPlayers.filter(p => p.team !== myPlayer.team) : otherPlayers;
 

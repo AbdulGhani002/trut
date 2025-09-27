@@ -38,19 +38,14 @@ export default function PlayerHand({ myHand, gameState, myPlayerId, canPlay }: P
       return false;
     }
 
-    // If it's 1v1 mode, only the single opponent sees buttons
-    if (gameState.challengeRespondent === myPlayerId) {
-      return true;
-    }
+    // Show buttons only to the current respondent
+    return gameState.challengeRespondent === myPlayerId;
+  };
 
-    // For 2v2 mode, check if current player is an opponent of the truting player
-    // We need to determine teams from the game state or room data
-    // Since we don't have direct access to room data here, we'll use the challengeRespondents array
-    if (gameState.challengeRespondents && gameState.challengeRespondents.includes(myPlayerId)) {
-      return true;
-    }
-
-    return false;
+  // Check if player is waiting for their turn to respond
+  const isWaitingForChallengeResponse = () => {
+    if (!gameState?.awaitingChallengeResponse || !myPlayerId) return false;
+    return gameState.challengeRespondents?.includes(myPlayerId) && gameState.challengeRespondent !== myPlayerId;
   };
 
   // Reset playing card state when game state changes
@@ -95,11 +90,11 @@ export default function PlayerHand({ myHand, gameState, myPlayerId, canPlay }: P
       {/* Action Buttons */}
       <div className="flex justify-center gap-4">
         {shouldShowChallengeButtons() ? (
-          // Show challenge response buttons to all opponents
+          // Show challenge response buttons to current respondent
           <>
             <button 
               onClick={() => handleChallengeResponse(true)}
-              className="px-6 py-3 rounded-xl bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold text-lg shadow-lg hover:shadow-xl transform hover:-translate-y-1 transition-all duration-200"
+              className="px-6 py-3 rounded-xl bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold text-lg shadow-lg hover:shadow-xl transform hover:-translate-y-1 transition-all duration-200 animate-pulse"
             >
               ✓ Accept Challenge
             </button>
@@ -110,6 +105,13 @@ export default function PlayerHand({ myHand, gameState, myPlayerId, canPlay }: P
               ✗ Fold
             </button>
           </>
+        ) : isWaitingForChallengeResponse() ? (
+          // Show waiting message for players waiting their turn
+          <div className="px-6 py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 text-white font-bold text-lg shadow-lg">
+            <span className="flex items-center gap-2">
+              ⏳ Waiting for your turn to respond...
+            </span>
+          </div>
         ) : (
           // Show normal Trut button
           <button 

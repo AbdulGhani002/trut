@@ -136,8 +136,11 @@ export class Trut2v2Engine extends BaseTrutEngine {
         return { success: false, error: 'Truting team not found' };
       }
 
+      // When challenge is folded, truting team gets a cannet
       gameState.scores[trutingPlayer.team].cannets++;
       this.convertCannets(gameState.scores);
+      gameState.roundEndedAt = new Date();
+      this.resetRoundState(gameState);
 
       if (this.isGameEnded(gameState)) {
         gameState.gameEnded = true;
@@ -219,11 +222,35 @@ export class Trut2v2Engine extends BaseTrutEngine {
   private assignTeams(room: GameRoom): void {
     if (room.teamMode === 'solo') {
       const shuffledPlayers = [...room.players].sort(() => Math.random() - 0.5);
+      // Alternating seating: Team1, Team2, Team1, Team2
+      // This prevents teammates from playing consecutively
       shuffledPlayers[0].team = 'team1';
       shuffledPlayers[1].team = 'team2';
-      shuffledPlayers[2].team = 'team2';
-      shuffledPlayers[3].team = 'team1';
+      shuffledPlayers[2].team = 'team1';
+      shuffledPlayers[3].team = 'team2';
+      
+      // Log team assignment for debugging
+      console.log('🎯 Team assignment (alternating seating):');
+      shuffledPlayers.forEach((player, index) => {
+        console.log(`  Position ${index + 1}: ${player.name} (${player.team})`);
+      });
+      console.log('✅ Turn order will be: Team1 → Team2 → Team1 → Team2');
+      
+      // Validate alternating seating
+      const isValid = this.validateAlternatingSeating(shuffledPlayers);
+      console.log(`🔍 Alternating seating validation: ${isValid ? '✅ VALID' : '❌ INVALID'}`);
     }
+  }
+
+  private validateAlternatingSeating(players: Player[]): boolean {
+    // Check if teams alternate (no consecutive teammates)
+    for (let i = 0; i < players.length - 1; i++) {
+      if (players[i].team === players[i + 1].team) {
+        console.log(`❌ Consecutive teammates found: ${players[i].name} (${players[i].team}) and ${players[i + 1].name} (${players[i + 1].team})`);
+        return false;
+      }
+    }
+    return true;
   }
 
   private getTeamForPlayer(players: Player[], playerId: string): 'team1' | 'team2' {

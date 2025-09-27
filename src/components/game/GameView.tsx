@@ -11,8 +11,9 @@ import { Card, Player } from '../../../shared/types/game';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
 export default function GameView() {
-  const { gameState, myPlayerId, leaveGame, currentRoom } = useMultiplayerStore();
+  const { gameState, myPlayerId, leaveGame, currentRoom, lastChallengeMessage } = useMultiplayerStore();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [showChallengeResolution, setShowChallengeResolution] = useState(false);
   
   // Get players (memoized to prevent dependency issues) - must be before early return
   const players = useMemo(() => currentRoom?.players || [], [currentRoom?.players]);
@@ -31,23 +32,61 @@ export default function GameView() {
       };
     }
 
-  const getTeamForPlayer = (playerId: string) => {
-    const playerIndex = players.findIndex(p => p.id === playerId);
-    return playerIndex === 0 ? 'team1' : 'team2';
-  };
-
-    const myTeam = getTeamForPlayer(myPlayerId || '') as 'team1' | 'team2';
-    const opponentTeam = getTeamForPlayer(opponent?.id || '') as 'team1' | 'team2';
+  // Get team from player data (matches server's team assignment)
+  const myTeam = (myPlayer?.team || 'team1') as 'team1' | 'team2';
+  const opponentTeam = (myTeam === 'team1' ? 'team2' : 'team1') as 'team1' | 'team2';
 
     const gameScores = gameState.scores || { team1: { truts: 0, cannets: 0 }, team2: { truts: 0, cannets: 0 } };
     const myScore = gameScores[myTeam];
     const opponentScore = gameScores[opponentTeam];
 
-  // Calculate current round tricks won
+  // Calculate current round tricks won by teams (properly handle rotten tricks)
   const trickWinners = gameState.trickWinners || [];
+  
+  // Helper function to find next non-rotten winner (matches server logic)
+  const findNextNonRottenWinner = (trickWinners: (string | 'rotten')[], rottenIndex: number): string | null => {
+    // Look forward first
+    for (let i = rottenIndex + 1; i < trickWinners.length; i++) {
+      if (trickWinners[i] !== 'rotten') {
+        return trickWinners[i] as string;
+      }
+    }
+    // Look backward if no forward winner
+    for (let i = rottenIndex - 1; i >= 0; i--) {
+      if (trickWinners[i] !== 'rotten') {
+        return trickWinners[i] as string;
+      }
+    }
+    return null;
+  };
+
   const currentRoundTricks = {
-    mine: trickWinners.filter((winner: string) => winner === myPlayerId).length,
-    opponent: trickWinners.filter((winner: string) => winner === opponent?.id).length
+    mine: trickWinners.filter((winner: string | 'rotten') => {
+      if (winner === 'rotten') {
+        const rottenIndex = trickWinners.indexOf(winner);
+        const nextWinner = findNextNonRottenWinner(trickWinners, rottenIndex);
+        if (nextWinner) {
+          const winnerPlayer = players.find(p => p.id === nextWinner);
+          return winnerPlayer?.team === myTeam;
+        }
+        return false;
+      }
+      const winnerPlayer = players.find(p => p.id === winner);
+      return winnerPlayer?.team === myTeam;
+    }).length,
+    opponent: trickWinners.filter((winner: string | 'rotten') => {
+      if (winner === 'rotten') {
+        const rottenIndex = trickWinners.indexOf(winner);
+        const nextWinner = findNextNonRottenWinner(trickWinners, rottenIndex);
+        if (nextWinner) {
+          const winnerPlayer = players.find(p => p.id === nextWinner);
+          return winnerPlayer?.team === opponentTeam;
+        }
+        return false;
+      }
+      const winnerPlayer = players.find(p => p.id === winner);
+      return winnerPlayer?.team === opponentTeam;
+    }).length
   };
 
     return { myTeam, opponentTeam, myScore, opponentScore, currentRoundTricks };
@@ -73,6 +112,20 @@ export default function GameView() {
     }
   };
 
+  // Show challenge resolution banner when challenge is resolved
+  React.useEffect(() => {
+    if (gameState?.phase === 'truting' && !gameState?.awaitingChallengeResponse) {
+      setShowChallengeResolution(true);
+      // Auto-hide after 3 seconds
+      const timer = setTimeout(() => {
+        setShowChallengeResolution(false);
+      }, 3000);
+      return () => clearTimeout(timer);
+    } else {
+      setShowChallengeResolution(false);
+    }
+  }, [gameState?.phase, gameState?.awaitingChallengeResponse]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       <ConfirmDialog
@@ -96,10 +149,56 @@ export default function GameView() {
             myTeam={myTeam}
             opponentTeam={opponentTeam}
             currentRoundTricks={currentRoundTricks}
+            players={players}
           />
 
           {/* Game Content - Right Side */}
           <div className="lg:col-span-3">
+            {/* Challenge Notification Banner */}
+            {gameState.awaitingChallengeResponse && (
+              <div className="mb-4 p-4 rounded-xl bg-gradient-to-r from-orange-500/20 to-red-500/20 border-2 border-orange-500/30">
+                <div className="text-center">
+                  <div className="text-2xl mb-2">⚡ TRUT CHALLENGE! ⚡</div>
+                  <div className="text-white/90 font-semibold">
+                    {players.find(p => p.id === gameState.trutingPlayer)?.name || 'Player'} has called TRUT!
+                  </div>
+                  <div className="text-white/70 text-sm mt-1">
+                    {gameState.challengeRespondent === myPlayerId 
+                      ? "It's your turn to respond - Accept or Fold?"
+                      : `Waiting for ${players.find(p => p.id === gameState.challengeRespondent)?.name || 'Player'} to respond...`
+                    }
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Challenge Resolution Banner */}
+            {showChallengeResolution && (
+              <div className={`mb-4 p-4 rounded-xl border-2 ${
+                gameState.challengeAccepted 
+                  ? 'bg-gradient-to-r from-green-500/20 to-emerald-500/20 border-green-500/30' 
+                  : 'bg-gradient-to-r from-red-500/20 to-pink-500/20 border-red-500/30'
+              }`}>
+                <div className="text-center">
+                  <div className="text-2xl mb-2">
+                    {gameState.challengeAccepted ? '✅ CHALLENGE ACCEPTED!' : '❌ CHALLENGE FOLDED!'}
+                  </div>
+                  <div className="text-white/90 font-semibold">
+                    {gameState.challengeAccepted 
+                      ? 'Playing for Long Point! The stakes are high!'
+                      : 'Starting new round...'
+                    }
+                  </div>
+                  <div className="text-white/70 text-sm mt-1">
+                    {gameState.challengeAccepted 
+                      ? 'Winner gets a trut, loser loses all cannets!'
+                      : 'Truting team gets a cannet point.'
+                    }
+                  </div>
+                </div>
+              </div>
+            )}
+
             <GameStatus 
               gameState={gameState}
               myPlayerId={myPlayerId}
@@ -125,8 +224,18 @@ export default function GameView() {
               onLeaveGame={handleLeaveGame}
             />
 
+            {/* Challenge Response Message */}
+            {lastChallengeMessage && (
+              <div className="mt-4 text-center">
+                <div className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-orange-600/80 text-white font-semibold shadow-lg">
+                  <div className="w-2 h-2 rounded-full bg-orange-300 animate-pulse"></div>
+                  {lastChallengeMessage}
+                </div>
+              </div>
+            )}
+
             {/* Turn Indicator */}
-            {!gameState.gameEnded && !canPlay && gameState.phase === 'playing' && (
+            {!gameState.gameEnded && !canPlay && gameState.phase === 'playing' && !lastChallengeMessage && (
               <div className="mt-4 text-center">
                 <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-700/50 text-white/70">
                   <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></div>

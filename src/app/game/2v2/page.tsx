@@ -13,6 +13,7 @@ export default function Game2v2Page() {
   const store = useMultiplayerStore();
   const hasStartedMatchmaking = useRef(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [showChallengeResolution, setShowChallengeResolution] = useState(false);
   
   const [gameData] = useState({
     betAmount: 300, // Fixed bet amount for 2v2 games
@@ -55,16 +56,18 @@ export default function Game2v2Page() {
   const myPlayerId = store.myPlayerId;
 
   // Use real players from room or fallback to mock for demo
+  // Mock data now reflects alternating seating: Team1, Team2, Team1, Team2
   const players = currentRoom?.players || [
     { id: myPlayerId || "player1", name: store.playerName || "You", team: 'team1' as const, isReady: false, isConnected: true, socketId: '', joinedAt: new Date() },
-    { id: "player2", name: "Teammate", team: 'team1' as const, isReady: false, isConnected: true, socketId: '', joinedAt: new Date() },
-    { id: "player3", name: "Opponent 1", team: 'team2' as const, isReady: false, isConnected: true, socketId: '', joinedAt: new Date() },
+    { id: "player2", name: "Opponent 1", team: 'team2' as const, isReady: false, isConnected: true, socketId: '', joinedAt: new Date() },
+    { id: "player3", name: "Teammate", team: 'team1' as const, isReady: false, isConnected: true, socketId: '', joinedAt: new Date() },
     { id: "player4", name: "Opponent 2", team: 'team2' as const, isReady: false, isConnected: true, socketId: '', joinedAt: new Date() }
   ];
 
   const currentTrick = gameState?.currentTrick || [];
   const myHand = gameState?.hands?.[myPlayerId || ''] || [];
   const scores = gameState?.scores || { team1: { truts: 0, cannets: 0 }, team2: { truts: 0, cannets: 0 } };
+  const canPlay = gameState?.currentPlayer === myPlayerId && gameState?.phase === 'playing';
   
   // Calculate actual tricks won by teams
   const trickWinners = gameState?.trickWinners || [];
@@ -72,18 +75,53 @@ export default function Game2v2Page() {
   const myTeam = myPlayer?.team || 'team1';
   const opponentTeam = myTeam === 'team1' ? 'team2' : 'team1';
   
-  // Count tricks won by each team
+  // Count tricks won by each team (properly handle rotten tricks)
   const myTeamTricks = trickWinners.filter(winner => {
-    if (winner === 'rotten') return false;
+    if (winner === 'rotten') {
+      // For rotten tricks, find the next non-rotten winner
+      const rottenIndex = trickWinners.indexOf(winner);
+      const nextWinner = findNextNonRottenWinner(trickWinners, rottenIndex);
+      if (nextWinner) {
+        const winnerPlayer = players.find(p => p.id === nextWinner);
+        return winnerPlayer?.team === myTeam;
+      }
+      return false;
+    }
     const winnerPlayer = players.find(p => p.id === winner);
     return winnerPlayer?.team === myTeam;
   }).length;
   
   const opponentTeamTricks = trickWinners.filter(winner => {
-    if (winner === 'rotten') return false;
+    if (winner === 'rotten') {
+      // For rotten tricks, find the next non-rotten winner
+      const rottenIndex = trickWinners.indexOf(winner);
+      const nextWinner = findNextNonRottenWinner(trickWinners, rottenIndex);
+      if (nextWinner) {
+        const winnerPlayer = players.find(p => p.id === nextWinner);
+        return winnerPlayer?.team === opponentTeam;
+      }
+      return false;
+    }
     const winnerPlayer = players.find(p => p.id === winner);
     return winnerPlayer?.team === opponentTeam;
   }).length;
+
+  // Helper function to find next non-rotten winner (matches server logic)
+  function findNextNonRottenWinner(trickWinners: (string | 'rotten')[], rottenIndex: number): string | null {
+    // Look forward first
+    for (let i = rottenIndex + 1; i < trickWinners.length; i++) {
+      if (trickWinners[i] !== 'rotten') {
+        return trickWinners[i] as string;
+      }
+    }
+    // Look backward if no forward winner
+    for (let i = rottenIndex - 1; i >= 0; i--) {
+      if (trickWinners[i] !== 'rotten') {
+        return trickWinners[i] as string;
+      }
+    }
+    return null;
+  }
 
   // Show waiting when: connecting, searching, or no room yet after starting matchmaking
   const isWaiting =
@@ -94,6 +132,20 @@ export default function Game2v2Page() {
   const handleLeaveGame = () => {
     setConfirmOpen(true);
   };
+
+  // Show challenge resolution banner when challenge is resolved
+  useEffect(() => {
+    if (gameState?.phase === 'truting' && !gameState?.awaitingChallengeResponse) {
+      setShowChallengeResolution(true);
+      // Auto-hide after 3 seconds
+      const timer = setTimeout(() => {
+        setShowChallengeResolution(false);
+      }, 3000);
+      return () => clearTimeout(timer);
+    } else {
+      setShowChallengeResolution(false);
+    }
+  }, [gameState?.phase, gameState?.awaitingChallengeResponse]);
 
   // Show matchmaking screen while searching / waiting
   if (isWaiting) {
@@ -305,6 +357,51 @@ export default function Game2v2Page() {
 
           {/* Game Content - Right Side */}
           <div className="lg:col-span-3">
+            {/* Challenge Notification Banner */}
+            {gameState?.awaitingChallengeResponse && (
+              <div className="mb-6 p-4 rounded-xl bg-gradient-to-r from-orange-500/20 to-red-500/20 border-2 border-orange-500/30">
+                <div className="text-center">
+                  <div className="text-2xl mb-2">⚡ TRUT CHALLENGE! ⚡</div>
+                  <div className="text-white/90 font-semibold">
+                    {players.find(p => p.id === gameState.trutingPlayer)?.name || 'Player'} has called TRUT!
+                  </div>
+                  <div className="text-white/70 text-sm mt-1">
+                    {gameState.challengeRespondent === myPlayerId 
+                      ? "It's your turn to respond - Accept or Fold?"
+                      : `Waiting for ${players.find(p => p.id === gameState.challengeRespondent)?.name || 'Player'} to respond...`
+                    }
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Challenge Resolution Banner */}
+            {showChallengeResolution && gameState && (
+              <div className={`mb-6 p-4 rounded-xl border-2 ${
+                gameState.challengeAccepted 
+                  ? 'bg-gradient-to-r from-green-500/20 to-emerald-500/20 border-green-500/30' 
+                  : 'bg-gradient-to-r from-red-500/20 to-pink-500/20 border-red-500/30'
+              }`}>
+                <div className="text-center">
+                  <div className="text-2xl mb-2">
+                    {gameState.challengeAccepted ? '✅ CHALLENGE ACCEPTED!' : '❌ CHALLENGE FOLDED!'}
+                  </div>
+                  <div className="text-white/90 font-semibold">
+                    {gameState.challengeAccepted 
+                      ? 'Playing for Long Point! The stakes are high!'
+                      : 'Starting new round...'
+                    }
+                  </div>
+                  <div className="text-white/70 text-sm mt-1">
+                    {gameState.challengeAccepted 
+                      ? 'Winner gets a trut, loser loses all cannets!'
+                      : 'Truting team gets a cannet point.'
+                    }
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Game Status */}
             <div className="glass-panel p-4 mb-6 text-center">
               <div className="text-white/80">
@@ -333,6 +430,26 @@ export default function Game2v2Page() {
                 myPlayerId={myPlayerId}
                 canPlay={gameState.currentPlayer === myPlayerId}
               />
+            )}
+
+            {/* Challenge Response Message */}
+            {store.lastChallengeMessage && (
+              <div className="mt-4 text-center">
+                <div className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-orange-600/80 text-white font-semibold shadow-lg">
+                  <div className="w-2 h-2 rounded-full bg-orange-300 animate-pulse"></div>
+                  {store.lastChallengeMessage}
+                </div>
+              </div>
+            )}
+
+            {/* Turn Indicator */}
+            {!gameState?.gameEnded && !canPlay && gameState?.phase === 'playing' && !store.lastChallengeMessage && (
+              <div className="mt-4 text-center">
+                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-700/50 text-white/70">
+                  <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></div>
+                  Waiting for opponent&apos;s move...
+                </div>
+              </div>
             )}
 
           </div>

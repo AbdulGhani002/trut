@@ -4,6 +4,7 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import { GameManager } from './services/GameManager';
 import { GameEvent } from '../../shared/types/game';
+import { BotStrategy } from './game/modes/bot1v1/BotStrategy';
 
 const app = express();
 const httpServer = createServer(app);
@@ -23,6 +24,7 @@ app.use(cors({
 app.use(express.json());
 
 const gameManager = new GameManager();
+const botStrategy = new BotStrategy();
 
 // Helper: if it's the bot's turn in a bot1v1 room, auto-play a card
 const maybeScheduleBotMove = (roomId: string) => {
@@ -416,23 +418,35 @@ io.on('connection', (socket) => {
       const room = result.data;
       if (room.gameMode === 'bot1v1' && room.gameState?.awaitingChallengeResponse) {
         const bot = room.players.find(p => p.isBot);
-        if (bot && room.gameState.challengeRespondent === bot.id) {
+        const human = room.players.find(p => !p.isBot);
+        if (bot && human && room.gameState.challengeRespondent === bot.id) {
           setTimeout(() => {
-            // Bot always accepts challenges for now (can be made smarter later)
+            // Use bot strategy to decide whether to accept or reject
+            const shouldAccept = botStrategy.shouldAcceptChallenge(
+              room.gameState!,
+              bot,
+              human,
+              bot.botProfile?.difficulty || 'normal'
+            );
+            
             const botEvent: GameEvent = { 
               type: 'challenge_response', 
               playerId: bot.id, 
-              data: { accept: true }, 
+              data: { accept: shouldAccept }, 
               timestamp: new Date() 
             } as any;
             
             const botResult = gameManager.processGameEvent(bot.id, botEvent);
             if (botResult.success && botResult.data) {
+              const message = shouldAccept 
+                ? 'Bot accepted the challenge! Playing for Long Point!'
+                : 'Bot folded! Starting new round...';
+                
               io.to(room.id).emit('challengeResponse', {
                 playerId: bot.id,
-                accept: true,
+                accept: shouldAccept,
                 gameState: botResult.data.gameState,
-                message: 'Bot accepted the challenge! Playing for Long Point!'
+                message
               });
             }
           }, 1500); // 1.5 second delay for bot to "think"
@@ -462,11 +476,13 @@ io.on('connection', (socket) => {
         // Check if this was a 2v2 game and more responses are needed
         if (room.gameMode === '2v2' && gameState.awaitingChallengeResponse) {
           const nextRespondent = gameState.challengeRespondent;
+          const currentPlayerName = room.players.find(p => p.id === playerId)?.name || 'Player';
+          const nextRespondentName = room.players.find(p => p.id === nextRespondent)?.name || 'Player';
           io.to(room.id).emit('challengeResponse', { 
             playerId, 
             accept: false, 
             gameState,
-            message: `${playerId} folded. Waiting for ${nextRespondent} to respond...`
+            message: `${currentPlayerName} folded. Waiting for ${nextRespondentName} to respond...`
           });
         } else {
           // All opponents folded or 1v1 fold
