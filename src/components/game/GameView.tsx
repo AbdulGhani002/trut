@@ -7,7 +7,7 @@ import GameStatus from './GameStatus';
 import GameTable from './GameTable';
 import PlayerHand from './PlayerHand';
 import GameEndScreen from './GameEndScreen';
-import { Card, Player } from '../../../shared/types/game';
+// types imported where needed; avoid unused imports here
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
 export default function GameView() {
@@ -33,35 +33,35 @@ export default function GameView() {
     }
 
   // Get team from player data (matches server's team assignment)
-  const myTeam = (myPlayer?.team || 'team1') as 'team1' | 'team2';
-  const opponentTeam = (myTeam === 'team1' ? 'team2' : 'team1') as 'team1' | 'team2';
+  const myTeam: 'team1' | 'team2' = myPlayer?.team === 'team2' ? 'team2' : 'team1';
+  const opponentTeam: 'team1' | 'team2' = myTeam === 'team1' ? 'team2' : 'team1';
 
     const gameScores = gameState.scores || { team1: { truts: 0, cannets: 0 }, team2: { truts: 0, cannets: 0 } };
     const myScore = gameScores[myTeam];
     const opponentScore = gameScores[opponentTeam];
 
   // Calculate current round tricks won by teams (properly handle rotten tricks)
-  const trickWinners = gameState.trickWinners || [];
+  const trickWinners: string[] = gameState.trickWinners || [];
   
   // Helper function to find next non-rotten winner (matches server logic)
-  const findNextNonRottenWinner = (trickWinners: (string | 'rotten')[], rottenIndex: number): string | null => {
+  const findNextNonRottenWinner = (trickWinners: string[], rottenIndex: number): string | null => {
     // Look forward first
     for (let i = rottenIndex + 1; i < trickWinners.length; i++) {
       if (trickWinners[i] !== 'rotten') {
-        return trickWinners[i] as string;
+        return trickWinners[i];
       }
     }
     // Look backward if no forward winner
     for (let i = rottenIndex - 1; i >= 0; i--) {
       if (trickWinners[i] !== 'rotten') {
-        return trickWinners[i] as string;
+        return trickWinners[i];
       }
     }
     return null;
   };
 
   const currentRoundTricks = {
-    mine: trickWinners.filter((winner: string | 'rotten') => {
+  mine: trickWinners.filter((winner) => {
       if (winner === 'rotten') {
         const rottenIndex = trickWinners.indexOf(winner);
         const nextWinner = findNextNonRottenWinner(trickWinners, rottenIndex);
@@ -74,7 +74,7 @@ export default function GameView() {
       const winnerPlayer = players.find(p => p.id === winner);
       return winnerPlayer?.team === myTeam;
     }).length,
-    opponent: trickWinners.filter((winner: string | 'rotten') => {
+  opponent: trickWinners.filter((winner) => {
       if (winner === 'rotten') {
         const rottenIndex = trickWinners.indexOf(winner);
         const nextWinner = findNextNonRottenWinner(trickWinners, rottenIndex);
@@ -92,27 +92,17 @@ export default function GameView() {
     return { myTeam, opponentTeam, myScore, opponentScore, currentRoundTricks };
   }, [myPlayerId, opponent?.id, players, gameState]);
   
-  if (!gameState || !currentRoom) return null;
-
-  const myHand = (gameState.hands?.[myPlayerId || ''] || []) as Card[];
-  const currentTrick = gameState.currentTrick || [];
-  const canPlay = gameState.currentPlayer === myPlayerId && gameState.phase === 'playing';
-  const isMyTurn = gameState.currentPlayer === myPlayerId;
+  const myHand = gameState?.hands?.[myPlayerId || ''] || [];
+  const currentTrick = gameState?.currentTrick || [];
+  const canPlay = gameState?.currentPlayer === myPlayerId && gameState?.phase === 'playing';
+  const isMyTurn = gameState?.currentPlayer === myPlayerId;
 
 
   const handleLeaveGame = () => {
     setConfirmOpen(true);
   };
 
-  const handleConfirmLeave = () => {
-    setConfirmOpen(false);
-    const success = leaveGame();
-    if (!success) {
-      alert('Failed to leave the game. You may be disconnected from the server. Please refresh the page to reconnect.');
-    }
-  };
-
-  // Show challenge resolution banner when challenge is resolved
+  // Show challenge resolution when phase changes; ensure hook is called unconditionally
   React.useEffect(() => {
     if (gameState?.phase === 'truting' && !gameState?.awaitingChallengeResponse) {
       setShowChallengeResolution(true);
@@ -125,6 +115,17 @@ export default function GameView() {
       setShowChallengeResolution(false);
     }
   }, [gameState?.phase, gameState?.awaitingChallengeResponse]);
+
+  if (!gameState || !currentRoom) return null;
+  const handleConfirmLeave = () => {
+    setConfirmOpen(false);
+    const success = leaveGame();
+    if (!success) {
+      alert('Failed to leave the game. You may be disconnected from the server. Please refresh the page to reconnect.');
+    }
+  };
+
+  // (effect above already handles showing challenge resolution)
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
@@ -144,8 +145,6 @@ export default function GameView() {
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           <ScorePanel
             scores={gameState.scores}
-            myPlayer={myPlayer}
-            opponent={opponent}
             myTeam={myTeam}
             opponentTeam={opponentTeam}
             currentRoundTricks={currentRoundTricks}

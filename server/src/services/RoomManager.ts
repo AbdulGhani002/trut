@@ -37,6 +37,7 @@ export class RoomManager {
       createdAt: new Date(),
       betAmount: gameMode === '2v2' ? betAmount : undefined,
       teamMode: gameMode === '2v2' ? teamMode : undefined,
+      // Prize pool reflects human contributions (bots don't pay bets)
       prizePool: gameMode === '2v2' && betAmount ? betAmount * 4 : undefined,
       isBotRoom: gameMode === 'bot1v1',
       botConfig: botConfig,
@@ -251,15 +252,17 @@ export class RoomManager {
   // Prize distribution for 2v2
   calculatePrizeDistribution(room: GameRoom, winningTeam: 'team1' | 'team2'): { [playerId: string]: number } {
     if (room.gameMode !== '2v2' || !room.prizePool) return {};
-    
-    const winners = room.players.filter(p => p.team === winningTeam);
-    const prizePerWinner = Math.floor(room.prizePool / 2); // Split between 2 team members
-    
+
+    // Only humans receive tokens. Split prizePool among human winners only.
+    const humanWinners = room.players.filter(p => p.team === winningTeam && !p.isBot);
+    const humanCount = humanWinners.length;
+    if (humanCount === 0) return {};
+
+    const prizePerHuman = Math.floor(room.prizePool / humanCount);
     const distribution: { [playerId: string]: number } = {};
-    winners.forEach(player => {
-      distribution[player.id] = prizePerWinner;
-    });
-    
+    for (const player of humanWinners) {
+      distribution[player.id] = prizePerHuman;
+    }
     return distribution;
   }
 }

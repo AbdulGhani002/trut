@@ -96,6 +96,7 @@ export class MatchmakingService {
   private find2v2Match(betAmount?: number): MatchmakingRequest[] | null {
     // Solo queue: pick first 4 players
     const FIXED_2V2_BET = 300;
+    const PARTIAL_FILL_WAIT_MS = 20_000; // wait 20s before filling with bots
     const soloQueue = this.queue2v2.filter(req => req.teamMode === 'solo');
 
     console.log(`2v2 Match check: Found ${soloQueue.length}/4 players in solo queue`);
@@ -105,6 +106,23 @@ export class MatchmakingService {
       this.queue2v2 = this.queue2v2.filter(r => !matchedIds.has(r.playerId));
       console.log(`🎮 2v2 Solo match found (fixed bet: ${FIXED_2V2_BET}): ${matched.map(m => m.playerName || m.playerId).join(', ')}`);
       return matched;
+    }
+
+    // Not enough players: after a wait threshold, match whoever is waiting and fill with bots later
+    if (soloQueue.length > 0) {
+      const now = Date.now();
+      const oldest = soloQueue.reduce((min, r) => r.timestamp < min.timestamp ? r : min, soloQueue[0]);
+      const waitedMs = now - oldest.timestamp.getTime();
+      if (waitedMs >= PARTIAL_FILL_WAIT_MS) {
+        const matched = soloQueue.slice(0, 4);
+        const matchedIds = new Set(matched.map(m => m.playerId));
+        this.queue2v2 = this.queue2v2.filter(r => !matchedIds.has(r.playerId));
+        console.log(`🤖 2v2 partial match after wait (${Math.floor(waitedMs/1000)}s): ${matched.map(m => m.playerName || m.playerId).join(', ')}`);
+        return matched;
+      } else {
+        const remaining = Math.ceil((PARTIAL_FILL_WAIT_MS - waitedMs) / 1000);
+        console.log(`⏳ Waiting ${remaining}s more before bot-fill for 2v2 (players in queue: ${soloQueue.length})`);
+      }
     }
 
     // TODO: Add team-based matchmaking (teams of 2 looking for opponents)

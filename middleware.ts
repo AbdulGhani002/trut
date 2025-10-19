@@ -1,18 +1,19 @@
 import { NextResponse, NextRequest } from 'next/server';
+import { getToken } from 'next-auth/jwt';
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const playerName = request.cookies.get('playerName')?.value;
+  const token = await getToken({ req: request });
 
-  // If not logged in and trying to access dashboard/root, send to /login
-  if (!playerName && (pathname === '/' || pathname.startsWith('/(dashboard)'))) {
+  // If no token and trying to access a protected route, redirect to /login
+  if (!token && (pathname.startsWith('/game') || pathname === '/')) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     return NextResponse.redirect(url);
   }
 
-  // If already logged in and visiting /login, go to dashboard
-  if (playerName && pathname === '/login') {
+  // If token exists and visiting /login, go to the home page
+  if (token && pathname === '/login') {
     const url = request.nextUrl.clone();
     url.pathname = '/';
     return NextResponse.redirect(url);
@@ -22,7 +23,7 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/', '/login'],
+  matcher: ['/game/:path*', '/'],
 };
 
 

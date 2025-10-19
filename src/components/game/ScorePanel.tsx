@@ -4,8 +4,6 @@ import { TeamScores, Player } from '../../../shared/types/game';
 
 interface ScorePanelProps {
   scores: TeamScores;
-  myPlayer: Player | undefined;
-  opponent: Player | undefined;
   myTeam: 'team1' | 'team2';
   opponentTeam: 'team1' | 'team2';
   currentRoundTricks: {
@@ -17,13 +15,11 @@ interface ScorePanelProps {
 
 export default function ScorePanel({ 
   scores, 
-  myPlayer, 
-  opponent, 
   myTeam, 
   opponentTeam, 
   currentRoundTricks,
   players = []
-}: ScorePanelProps) {
+}: Readonly<ScorePanelProps>) {
   const myScore = scores[myTeam];
   const opponentScore = scores[opponentTeam];
 

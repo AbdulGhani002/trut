@@ -1,5 +1,13 @@
-'use server';
+"use server";
 
+export async function resendVerificationEmail(email: string) {
+  await fetch(`/api/auth/resend-verification`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+    cache: 'no-store',
+  });
+}
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 

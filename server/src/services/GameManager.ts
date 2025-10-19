@@ -1,4 +1,4 @@
-import { GameRoom, Player, MatchmakingRequest, GameEvent, GameResult, GameMode, BotRoomConfig } from '../../../shared/types/game';
+import { GameRoom, MatchmakingRequest, GameEvent, GameResult, GameMode, BotRoomConfig } from '../../../shared/types/game';
 import { RoomManager } from './RoomManager';
 import { MatchmakingService } from './MatchmakingService';
 import { TrutBotEngine } from '../game/modes/bot1v1/TrutBotEngine';
@@ -6,9 +6,9 @@ import { Trut2v2Engine } from '../game/modes/2v2/Trut2v2Engine';
 import { BaseTrutEngine } from '../game/core/BaseTrutEngine';
 
 export class GameManager {
-  private roomManager: RoomManager;
-  private matchmakingService: MatchmakingService;
-  private engines: Map<GameMode, BaseTrutEngine>;
+  private readonly roomManager: RoomManager;
+  private readonly matchmakingService: MatchmakingService;
+  private readonly engines: Map<GameMode, BaseTrutEngine>;
 
   constructor() {
     this.roomManager = new RoomManager();
@@ -166,8 +166,9 @@ export class GameManager {
       return { success: false, error: 'Players have inconsistent game modes' };
     }
 
-    if (gameMode === '2v2' && matchedPlayers.length !== 4) {
-      return { success: false, error: `Expected 4 players for ${gameMode}, got ${matchedPlayers.length}` };
+    // For 2v2, we can proceed with fewer than 4 and fill with bots later
+    if (gameMode === '2v2' && matchedPlayers.length === 0) {
+      return { success: false, error: `Expected at least 1 player for ${gameMode}` };
     }
     const host = matchedPlayers[0];
     
@@ -201,9 +202,33 @@ export class GameManager {
       }
     }
 
-    matchedPlayers.forEach(player => {
+    for (const player of matchedPlayers) {
       this.setPlayerReady(player.playerId, true);
-    });
+    }
+
+    // If 2v2 and not enough players, fill remaining spots with bots
+    if (gameMode === '2v2') {
+      const needed = Math.max(0, 4 - room.players.length);
+      for (let i = 0; i < needed; i++) {
+        const botId = `bot-${room.id}-${i + 1}`;
+        const botName = `Bot ${i + 1}`;
+        const preferredTeam: 'team1' | 'team2' = (room.players.filter(p => p.team === 'team1').length <= room.players.filter(p => p.team === 'team2').length) ? 'team1' : 'team2';
+        const joinRes = this.joinRoom(room.id, botId, botName, preferredTeam);
+        if (!joinRes.success) {
+          return { success: false, error: `Failed to add bot ${botId}` };
+        }
+        // Mark as bot and ready
+        const botPlayer = room.players.find(p => p.id === botId);
+        if (botPlayer) {
+          botPlayer.isBot = true;
+          botPlayer.isReady = true;
+          botPlayer.botProfile = { strategyId: 'simple', difficulty: 'normal', displayName: botName };
+        }
+      }
+      // Recalculate prize pool based on number of humans (bots don't contribute)
+      const humanCount = room.players.filter(p => !p.isBot).length;
+      room.prizePool = (room.betAmount || 0) * humanCount;
+    }
 
     return { success: true, data: room };
   }
@@ -224,7 +249,7 @@ export class GameManager {
     const matches = this.matchmakingService.checkForMatches();
     const createdGames: { gameMode: GameMode; room: GameRoom; betAmount?: number }[] = [];
 
-    matches.forEach(match => {
+    for (const match of matches) {
       const roomResult = this.createMatchFromQueue(match.matches, match.betAmount);
       if (roomResult.success && roomResult.data) {
         createdGames.push({
@@ -233,7 +258,7 @@ export class GameManager {
           betAmount: match.betAmount
         });
       }
-    });
+    }
 
     return createdGames;
   }
@@ -241,8 +266,9 @@ export class GameManager {
   // Prize distribution for completed 2v2 games
   distributePrizes(roomId: string): { [playerId: string]: number } {
     const room = this.getRoom(roomId);
-    if (!room || !room.gameState?.winner) return {};
-
+    if (!room?.gameState?.winner) {
+      return {};
+    }
     return this.roomManager.calculatePrizeDistribution(room, room.gameState.winner);
   }
 

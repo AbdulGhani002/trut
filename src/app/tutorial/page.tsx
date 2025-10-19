@@ -25,14 +25,14 @@ export default function TutorialPage() {
           {/* Game Overview */}
           <section>
             <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-3">
-              <span className="text-3xl">🎯</span>
+              <span className="text-3xl" aria-hidden>🎯</span>{' '}
               What is TRUT?
             </h2>
             <div className="text-white/80 space-y-3">
               <p>
                 TRUT is a strategic card game that combines elements of bluffing, psychology, and tactical play. 
                 The goal is to win tricks by playing the highest card, but the twist is that you can challenge 
-                your opponent's claims with a "TRUT" call.
+                your opponent&apos;s claims with a &quot;TRUT&quot; call.
               </p>
               <p>
                 The game uses a 32-card deck (7, 8, 9, 10, J, Q, K, A in all four suits) and can be played 
@@ -44,7 +44,7 @@ export default function TutorialPage() {
           {/* Card Values */}
           <section>
             <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-3">
-              <span className="text-3xl">🃏</span>
+              <span className="text-3xl" aria-hidden>🃏</span>{' '}
               Card Values & Strength
             </h2>
             <div className="text-white/80 space-y-3">
@@ -72,13 +72,13 @@ export default function TutorialPage() {
           {/* Basic Gameplay */}
           <section>
             <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-3">
-              <span className="text-3xl">🎮</span>
+              <span className="text-3xl" aria-hidden>🎮</span>{' '}
               How to Play
             </h2>
             <div className="text-white/80 space-y-4">
               <div>
                 <h3 className="text-lg font-semibold text-white mb-2">1. Starting the Game</h3>
-                <p>Each player receives cards from a shuffled deck. Players take turns playing one card at a time to form a "trick."</p>
+                <p>Each player receives cards from a shuffled deck. Players take turns playing one card at a time to form a &quot;trick&quot;.</p>
               </div>
               
               <div>
@@ -88,12 +88,12 @@ export default function TutorialPage() {
               
               <div>
                 <h3 className="text-lg font-semibold text-white mb-2">3. Winning Tricks</h3>
-                <p>The player who plays the highest card wins the trick and becomes the next player to lead. If there's a tie (same rank), it becomes a "rotten trick" and no one wins.</p>
+                <p>The player who plays the highest card wins the trick and becomes the next player to lead. If there&apos;s a tie (same rank), it becomes a &quot;rotten trick&quot; and no one wins.</p>
               </div>
               
               <div>
                 <h3 className="text-lg font-semibold text-white mb-2">4. TRUT Calls</h3>
-                <p>At any point, you can call "TRUT" to challenge your opponent. This forces them to either accept the challenge (play for the trick) or fold (give up the trick).</p>
+                <p>At any point, you can call &quot;TRUT&quot; to challenge your opponent. This forces them to either accept the challenge (play for the trick) or fold (give up the trick).</p>
               </div>
             </div>
           </section>
@@ -101,7 +101,7 @@ export default function TutorialPage() {
           {/* Scoring */}
           <section>
             <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-3">
-              <span className="text-3xl">📊</span>
+              <span className="text-3xl" aria-hidden>📊</span>{' '}
               Scoring System
             </h2>
             <div className="text-white/80 space-y-3">
@@ -119,16 +119,16 @@ export default function TutorialPage() {
           {/* Strategy Tips */}
           <section>
             <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-3">
-              <span className="text-3xl">🧠</span>
+              <span className="text-3xl" aria-hidden>🧠</span>{' '}
               Strategy Tips
             </h2>
             <div className="text-white/80 space-y-3">
               <ul className="list-disc list-inside space-y-2 ml-4">
                 <li><strong>Bluffing:</strong> Sometimes play lower cards to make your opponent think you have better ones</li>
                 <li><strong>Card Counting:</strong> Keep track of which cards have been played to predict what your opponent might have</li>
-                <li><strong>TRUT Timing:</strong> Use TRUT calls strategically - don't waste them on obvious wins</li>
+                <li><strong>TRUT Timing:</strong> Use TRUT calls strategically - don&apos;t waste them on obvious wins</li>
                 <li><strong>Team Play (2v2):</strong> Coordinate with your teammate and communicate through your plays</li>
-                <li><strong>Save High Cards:</strong> Don't always play your strongest cards immediately</li>
+                <li><strong>Save High Cards:</strong> Don&apos;t always play your strongest cards immediately</li>
               </ul>
             </div>
           </section>
@@ -136,7 +136,7 @@ export default function TutorialPage() {
           {/* Game Modes */}
           <section>
             <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-3">
-              <span className="text-3xl">🎯</span>
+              <span className="text-3xl" aria-hidden>🎯</span>{' '}
               Game Modes
             </h2>
             <div className="text-white/80 space-y-4">

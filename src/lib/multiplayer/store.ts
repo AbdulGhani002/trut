@@ -26,6 +26,8 @@ interface MultiplayerStore {
   currentMode: 'bot1v1' | null;
   botOpponent: { id: string; isBot: boolean } | null;
   lastChallengeMessage: string | null;
+  _deductedRooms: Set<string>;
+  _creditedRooms: Set<string>;
 
   connect: () => Promise<void>;
   disconnect: () => void;
@@ -34,6 +36,9 @@ interface MultiplayerStore {
   cancelMatchmaking: () => void;
   leaveGame: () => boolean;
   joinBotMatch: () => void;
+  findMatch: () => void;
+  createRoom: () => void;
+  joinRoom: (roomCode: string) => void;
 
   sendChatMessage: (message: string) => void;
   playCard: (cardId: string) => void;
@@ -107,6 +112,9 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
   currentMode: null,
   botOpponent: null,
   lastChallengeMessage: null,
+  // internal flags to avoid duplicate token operations per room
+  _deductedRooms: new Set<string>(),
+  _creditedRooms: new Set<string>(),
 
   connect: async () => {
     const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'], timeout: 10000 });
@@ -134,7 +142,9 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
         gameState: data.gameState || null,
         matchmakingStatus: 'idle',
         currentMode: 'bot1v1',
-        botOpponent: data.room.players.find((p) => p.isBot) ? { id: data.room.players.find((p) => p.isBot)!.id, isBot: true } : null,
+        botOpponent: data.room.players.some((p) => p.isBot)
+          ? { id: (data.room.players.find((p) => p.isBot) || { id: '' }).id, isBot: true }
+          : null,
       });
     });
     socket.on('matchmakingStatus', (data: SocketEventData['matchmakingStatus']) => {
@@ -155,8 +165,23 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
         matchmakingStatus: 'idle',
         estimatedWaitTime: null,
         currentMode: data.room?.gameMode === 'bot1v1' ? 'bot1v1' : get().currentMode,
-        botOpponent: data.room?.players.find((p) => p.isBot) ? { id: data.room.players.find((p) => p.isBot)!.id, isBot: true } : null,
+        botOpponent: data.room?.players.some((p) => p.isBot)
+          ? { id: (data.room.players.find((p) => p.isBot) || { id: '' }).id, isBot: true }
+          : null,
       });
+
+      // Deduct bet tokens once when a 2v2 game starts
+      const room = data.room || get().currentRoom;
+      try {
+        if (room?.gameMode === '2v2' && room.betAmount && !get()._deductedRooms.has(room.id)) {
+          get()._deductedRooms.add(room.id);
+          fetch('/api/tokens/deduct', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ amount: 300 }),
+          }).catch(() => {});
+        }
+      } catch {}
     });
     socket.on('cardPlayed', (data: SocketEventData['cardPlayed']) => {
       // Use server state as single source of truth - no optimistic updates
@@ -193,6 +218,23 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
     });
     socket.on('gameEnded', (data: SocketEventData['gameEnded']) => {
       set({ gameState: data.gameState || null });
+      // Credit prize tokens to winners (600 each) for 2v2
+      try {
+        const room = get().currentRoom;
+        const state = data.gameState || get().gameState;
+        const myId = get().myPlayerId;
+        if (room?.gameMode === '2v2' && state?.winner && room.id && !get()._creditedRooms.has(room.id)) {
+          get()._creditedRooms.add(room.id);
+          const amount = myId ? (data?.prizeDistribution?.[myId] ?? 0) : 0;
+          if (amount > 0) {
+            fetch('/api/tokens/credit', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ amount }),
+            }).catch(() => {});
+          }
+        }
+      } catch {}
     });
     socket.on('leftRoom', () => {
       set({ currentRoom: null, gameState: null, chatMessages: [], unreadMessageCount: 0, matchmakingStatus: 'idle', estimatedWaitTime: null });
@@ -228,24 +270,6 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
       botConfig: request.botConfig,
     });
     console.log('Matchmaking start event emitted');
-  },
-
-  joinBotMatch: () => {
-    const { socket } = get();
-    if (!socket) {
-      console.warn('Cannot join bot match: no socket connection');
-      return;
-    }
-    const playerName = get().playerName || 'Guest';
-    const playerId = get().myPlayerId || socket.id;
-    set({ matchmakingStatus: 'searching', currentMode: 'bot1v1' });
-    
-    // Use the regular matchmaking system for bot games
-    socket.emit('startMatchmaking', {
-      gameMode: 'bot1v1',
-      playerName,
-      botConfig: { botStrategyId: 'simple', difficulty: 'easy' },
-    });
   },
 
   cancelMatchmaking: () => {
@@ -328,8 +352,43 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
     const trimmed = (name || '').slice(0, 20).trim();
     const finalName = trimmed.length > 0 ? trimmed : 'Guest';
     try {
-      if (typeof window !== 'undefined') localStorage.setItem('playerName', finalName);
+  if (typeof globalThis !== 'undefined' && typeof localStorage !== 'undefined') localStorage.setItem('playerName', finalName);
     } catch {}
     set({ playerName: finalName });
+  },
+
+  findMatch: () => {
+    const { socket, playerName, myPlayerId } = get();
+    if (!socket || !myPlayerId) return;
+    get().startMatchmaking({ gameMode: '2v2', playerId: myPlayerId, playerName, timestamp: new Date() });
+  },
+
+  createRoom: () => {
+    const { socket, playerName } = get();
+    if (!socket) return;
+    socket.emit('createRoom', { playerName });
+  },
+
+  joinRoom: (roomCode: string) => {
+    const { socket, playerName } = get();
+    if (!socket) return;
+    socket.emit('joinRoom', { roomCode, playerName });
+  },
+
+  joinBotMatch: () => {
+    const { socket } = get();
+    if (!socket) {
+      console.warn('Cannot join bot match: no socket connection');
+      return;
+    }
+    const playerName = get().playerName || 'Guest';
+    set({ matchmakingStatus: 'searching', currentMode: 'bot1v1' });
+    
+    // Use the regular matchmaking system for bot games
+    socket.emit('startMatchmaking', {
+      gameMode: 'bot1v1',
+      playerName,
+      botConfig: { botStrategyId: 'simple', difficulty: 'easy' },
+    });
   },
 }));

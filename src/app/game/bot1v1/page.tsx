@@ -91,11 +91,10 @@ export default function Bot1v1Page() {
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           <ScorePanel
             scores={gameState.scores}
-            myPlayer={myPlayer}
-            opponent={botPlayer}
             myTeam={myTeam}
             opponentTeam={botTeam}
             currentRoundTricks={currentRoundTricks}
+            players={players}
           />
 
           <div className="lg:col-span-3">

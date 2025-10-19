@@ -3,11 +3,12 @@ import { Card, GameResult, GameRoom, Player, TeamScores, TrutGameState } from '.
 
 export class Trut2v2Engine extends BaseTrutEngine {
   startGame(room: GameRoom): GameResult<TrutGameState> {
-    if (room.players.length < room.maxPlayers) {
-      return { success: false, error: 'Not enough players' };
+    // Allow starting with bots if humans are fewer than max players
+    if (room.players.length < 4) {
+      console.log(`Starting 2v2 with ${room.players.length} players (bots may be present)`);
     }
 
-    this.assignTeams(room);
+  this.assignTeams(room);
 
     const gameState = this.createInitialGameState(room, {
       mode: '2v2',

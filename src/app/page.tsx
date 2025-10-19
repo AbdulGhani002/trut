@@ -1,105 +1,55 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useMultiplayerStore } from "@/lib/multiplayer/store";
+import { useSession, signOut } from "next-auth/react";
 
 const GameView = dynamic(() => import("@/components/game/GameView"), { ssr: false });
 
 export default function Home() {
   const router = useRouter();
   const store = useMultiplayerStore();
-  const [tokens, setTokens] = useState<number>(1000);
-  const [nameInput, setNameInput] = useState<string>("");
+  const { data: session, status } = useSession();
+  const setPlayerName = useMultiplayerStore((s) => s.setPlayerName);
 
-  // Connect once on mount
+  // Handle session loading and authentication
   useEffect(() => {
-    if (!store.socket) {
+    if (status === 'unauthenticated') {
+      router.push('/login');
+    }
+    if (status === 'authenticated' && session?.user?.name) {
+      setPlayerName(session.user.name);
+    }
+  }, [status, router, session, setPlayerName]);
+
+  // Connect socket once authenticated
+  useEffect(() => {
+    if (status === 'authenticated' && !store.socket) {
       store.connect().catch(() => {});
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [status, store.connect, store.socket]);
 
   const connected = store.connectionStatus.status === 'connected';
-
-  useEffect(() => {
-    try {
-      const saved = typeof window !== 'undefined' ? localStorage.getItem('playerName') : null;
-      if (saved) {
-        setNameInput(saved);
-        store.setPlayerName(saved);
-      }
-    } catch {}
-  }, [store]);
-
-  // Fallback: hydrate name from cookie if localStorage is empty (after login redirect)
-  useEffect(() => {
-    try {
-      if (typeof document === 'undefined') return;
-      const hasLocal = localStorage.getItem('playerName');
-      const match = document.cookie.match(/(?:^|; )playerName=([^;]+)/);
-      const cookieVal = match ? decodeURIComponent(match[1]) : '';
-      
-      // Always update from cookie if it exists and is different from current store value
-      if (cookieVal && cookieVal !== store.playerName) {
-        localStorage.setItem('playerName', cookieVal);
-        setNameInput(cookieVal);
-        store.setPlayerName(cookieVal);
-      }
-    } catch (e) {
-      console.error('Error reading cookie:', e);
-    }
-  }, [store]);
-
-  const handleFindMatch = useCallback(() => {
-    if (!connected) return;
-    if (store.matchmakingStatus === 'searching') {
-      store.cancelMatchmaking();
-      return;
-    }
-    setTokens((t) => Math.max(0, t - 100));
-    store.startMatchmaking({
-      playerId: store.myPlayerId || 'temp-player-id',
-      gameMode: "bot1v1",
-      timestamp: new Date()
-    });
-  }, [connected, store]);
 
   const handle2v2Click = useCallback(() => {
     if (!connected) {
       alert('Not connected to server. Please wait...');
       return;
     }
-    // Go directly to 2v2 matchmaking with solo queue (auto-assign teams)
-    router.push('/game/2v2?teamMode=solo');
+    router.push('/game/2v2');
   }, [connected, router]);
 
   const handleBotClick = useCallback(() => {
-    // Go directly to bot game page - it will handle connection internally
     router.push('/game/bot1v1');
   }, [router]);
 
   const handleLogout = useCallback(async () => {
-    try {
-      // Clear localStorage
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('playerName');
-      }
-      
-      // Disconnect from socket
+    if (confirm('Are you sure you want to logout?')) {
       store.disconnect();
-      
-      // Clear the cookie by setting it to expire
-      document.cookie = 'playerName=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
-      
-      // Navigate to login page
-      router.push('/login');
-    } catch (error) {
-      console.error('Error during logout:', error);
-      // Even if there's an error, still navigate to login
-      router.push('/login');
+      await signOut({ redirect: true, callbackUrl: '/login' });
     }
-  }, [store, router]);
+  }, [store]);
 
   const tiles = useMemo(
     () => [
@@ -133,7 +83,7 @@ export default function Home() {
         subtitle: "Tokens and items",
         emoji: "🛒",
         gradient: "from-amber-600 to-yellow-600",
-        onClick: () => alert("Shop coming soon"),
+        onClick: () => router.push('/shop'),
       },
       {
         key: "stats",
@@ -143,37 +93,49 @@ export default function Home() {
         gradient: "from-blue-600 to-indigo-600",
         onClick: () => alert("Statistics coming soon"),
       },
-    ], [handle2v2Click, handleBotClick]
+    ],
+    [handle2v2Click, handleBotClick, router]
   );
+  
+  const inGame = useMemo(() => store.currentRoom || store.gameState, [store.currentRoom, store.gameState]);
+
+
+  if (status === 'loading' || !session) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <p>Loading...</p>
+      </div>
+    );
+  }
+  
+  if (inGame) {
+    return <GameView />;
+  }
 
   return (
     <div className="px-6 py-10 md:py-14">
-      {!store.currentRoom && (
-        <>
           <header className="text-center space-y-3 mb-8 md:mb-10">
             <h1 className="text-5xl md:text-6xl lg:text-7xl font-extrabold tracking-tight">TRUT</h1>
             <p className="text-sm md:text-base text-white/60">Bluff • Strategy • Psychology</p>
           </header>
 
-          {/* Removed 1v1 realtime matchmaking overlays - only 2v2 has matchmaking now */}
-
           <section className="max-w-4xl mx-auto glass-panel p-4 md:p-5 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-full bg-gradient-to-br from-orange-500 to-red-500 grid place-items-center text-white text-xl">🎯</div>
               <div>
-                <div className="text-white/90 font-semibold leading-tight">{store.playerName || 'Guest'}</div>
+                <div className="text-white/90 font-semibold leading-tight">{session.user.name || 'Guest'}</div>
                 <div className="text-xs text-white/50">👑 Level 1</div>
               </div>
             </div>
             <div className="flex items-center gap-3">
               <button
                 className="px-3 py-1.5 rounded-full bg-fuchsia-600 hover:bg-fuchsia-500 transition text-sm font-semibold shadow-lg"
-                onClick={() => setTokens((t) => t + 100)}
+                onClick={() => alert("This will be implemented later.")}
               >
                 Free Tokens
               </button>
               <div className="text-right">
-                <div className="font-bold">{tokens}</div>
+                <div className="font-bold">{session.user.tokens}</div>
                 <div className="text-xs text-white/50">Virtual Tokens</div>
               </div>
             </div>
@@ -184,8 +146,8 @@ export default function Home() {
               <button
                 key={tile.key}
                 onClick={tile.onClick}
-                disabled={false}
-                className="group text-left glass-panel p-5 hover:-translate-y-0.5 transition transform"
+                disabled={!connected && (tile.key === 'multi' || tile.key === 'bot')}
+                className="group text-left glass-panel p-5 hover:-translate-y-0.5 transition transform disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <div className={`h-12 w-12 rounded-xl bg-gradient-to-br ${tile.gradient} grid place-items-center text-xl shadow-lg`}>
                   <span>{tile.emoji}</span>
@@ -200,44 +162,13 @@ export default function Home() {
 
           <section className="max-w-5xl mx-auto mt-8 flex justify-center">
             <button
-              onClick={() => {
-                if (confirm('Are you sure you want to logout? You will need to enter your name again.')) {
-                  handleLogout();
-                }
-              }}
+              onClick={handleLogout}
               className="px-6 py-3 rounded-lg bg-red-600 hover:bg-red-500 transition text-white font-semibold shadow-lg"
               title="Logout and return to login page"
             >
               Logout
             </button>
           </section>
-        </>
-      )}
-
-      {store.currentRoom && (
-        <>
-          {!store.gameState && (
-            <div className="max-w-4xl mx-auto mt-8">
-              <div className="glass-panel p-6 text-center">
-                <div className="mb-4">
-                  <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-600/20 border border-blue-500/30 text-blue-400 mb-4">
-                    <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></div>
-                    <span className="font-medium">In Lobby</span>
-                  </div>
-                </div>
-                <div className="text-white/70 mb-2">
-                  <span className="font-semibold">Room:</span> <code className="px-2 py-1 rounded bg-white/10 text-sm">{store.currentRoom.id.slice(-8)}</code>
-                </div>
-                <div className="text-white/60">
-                  Players {store.currentRoom.players.length}/{store.currentRoom.maxPlayers} • Waiting for game start…
-                </div>
-              </div>
-            </div>
-          )}
-          {store.gameState && <GameView />}
-        </>
-      )}
-
     </div>
   );
 }

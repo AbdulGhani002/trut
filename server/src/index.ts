@@ -1,5 +1,6 @@
+/* eslint-disable max-depth, prefer-template, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, unicorn/no-array-for-each, unicorn/prefer-optional-chain, @typescript-eslint/prefer-optional-chain */
 import express from 'express';
-import { createServer } from 'http';
+import { createServer } from 'node:http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import { GameManager } from './services/GameManager';
@@ -97,9 +98,11 @@ const maybeScheduleBotMove = (roomId: string) => {
             const r = gameManager.getRoom(roomAfter.id);
             if (r && r.gameState) {
               if (r.gameState.gameEnded) {
+                const prizeDistribution = gameManager.distributePrizes(r.id);
                 io.to(r.id).emit('gameEnded', {
                   gameState: r.gameState,
                   winner: r.gameState.winner,
+                  prizeDistribution,
                   message: 'Game finished!'
                 });
               } else {
@@ -360,9 +363,11 @@ io.on('connection', (socket) => {
           if (updatedRoom && updatedRoom.gameState) {
             if (updatedRoom.gameState.gameEnded) {
               // Game finished
+              const prizeDistribution = gameManager.distributePrizes(room.id);
               io.to(room.id).emit('gameEnded', {
                 gameState: updatedRoom.gameState,
                 winner: updatedRoom.gameState.winner,
+                prizeDistribution,
                 message: 'Game finished!'
               });
             } else {
