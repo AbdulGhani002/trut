@@ -20,14 +20,23 @@ export async function POST(req: NextRequest) {
     const session = event.data.object as Stripe.Checkout.Session;
     const email = session.metadata?.email;
     const tokens = Number(session.metadata?.tokens || '0');
-    if (email && tokens > 0) {
-      await dbConnect();
-      const user = await User.findOne({ email });
-      if (user) {
-        user.tokens = (user.tokens || 0) + tokens;
-        await user.save();
-      }
+    if (!email) {
+      console.error('Stripe webhook: Missing email in session metadata.', session.metadata);
+      return NextResponse.json({ error: 'Missing email' }, { status: 400 });
     }
+    if (!tokens || tokens <= 0) {
+      console.error('Stripe webhook: Invalid tokens value in session metadata.', session.metadata);
+      return NextResponse.json({ error: 'Invalid tokens value' }, { status: 400 });
+    }
+    await dbConnect();
+    const user = await User.findOne({ email });
+    if (!user) {
+      console.error('Stripe webhook: User not found for email', email);
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+    user.tokens = (user.tokens || 0) + tokens;
+    await user.save();
+    console.log(`Stripe webhook: Credited ${tokens} tokens to user ${email}. New balance: ${user.tokens}`);
   }
 
   return NextResponse.json({ received: true });

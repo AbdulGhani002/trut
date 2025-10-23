@@ -149,7 +149,14 @@ export class Trut2v2Engine extends BaseTrutEngine {
         return { success: true, data: gameState };
       }
 
-      this.startNewRound(gameState, players.map(p => p.id));
+      // Only start a new round (deal new cards) if all hands are empty
+      const participants = players.map(p => p.id);
+      const handsEmpty = participants.every(p => (gameState.hands[p] || []).length === 0);
+      if (handsEmpty) {
+        this.startNewRound(gameState, participants);
+        gameState.newRoundStarted = true;
+      }
+      // Otherwise, just continue with current hands (no new cards)
       return { success: true, data: gameState };
     }
 

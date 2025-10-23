@@ -96,7 +96,7 @@ export class MatchmakingService {
   private find2v2Match(betAmount?: number): MatchmakingRequest[] | null {
     // Solo queue: pick first 4 players
     const FIXED_2V2_BET = 300;
-    const PARTIAL_FILL_WAIT_MS = 20_000; // wait 20s before filling with bots
+  const PARTIAL_FILL_WAIT_MS = 15_000; // wait 15s before filling with bots
     const soloQueue = this.queue2v2.filter(req => req.teamMode === 'solo');
 
     console.log(`2v2 Match check: Found ${soloQueue.length}/4 players in solo queue`);

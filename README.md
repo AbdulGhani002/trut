@@ -14,6 +14,33 @@ pnpm dev
 bun dev
 ```
 
+.env setup
+
+```bash
+NEXTAUTH_URL=http://localhost:3001
+NEXTAUTH_SECRET=
+
+# Socket server
+NEXT_PUBLIC_SOCKET_URL=http://localhost:4001
+
+# Mongo
+MONGODB_URI=mongodb://localhost:27017/trut
+
+# Stripe
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+MONGODB_URI=mongodb://localhost:27017/trut
+NEXTAUTH_SECRET=
+NEXTAUTH_URL=http://localhost:3001
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM=
+PORT=3001
+
+```
+
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
