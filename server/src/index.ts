@@ -4,7 +4,9 @@ import { createServer } from 'node:http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import { GameManager } from './services/GameManager';
-import { GameEvent } from '../../shared/types/game';
+import { GameEvent, GameRoom } from '../../shared/types/game';
+import mongoose from 'mongoose';
+import User from '../../shared/models/User';
 import { BotStrategy } from './game/modes/bot1v1/BotStrategy';
 
 const app = express();
@@ -27,23 +29,75 @@ app.use(express.json());
 const gameManager = new GameManager();
 const botStrategy = new BotStrategy();
 
-// Helper: if it's the bot's turn in a bot1v1 room, auto-play a card
+// Ensure we open a single Mongo connection in this process
+const ensureDb = async () => {
+  const ready = mongoose.connection.readyState; // 0=disconnected,1=connected,2=connecting
+  if (ready !== 1 && ready !== 2) {
+    if (!process.env.MONGODB_URI) throw new Error('MONGODB_URI is not set');
+    await mongoose.connect(process.env.MONGODB_URI);
+  }
+};
+
+// Deduct tokens for a 2v2 room (server-authoritative). Safe to call multiple times; it guards per-room.
+const deductedRoomsGlobal = (global as any);
+deductedRoomsGlobal.__deductedRooms = deductedRoomsGlobal.__deductedRooms || new Set<string>();
+const deductedRooms: Set<string> = deductedRoomsGlobal.__deductedRooms;
+
+const deductTokensForRoom = async (room: GameRoom) => {
+  if (room.gameMode !== '2v2') return;
+  if (deductedRooms.has(room.id)) return;
+  deductedRooms.add(room.id);
+  try {
+    await ensureDb();
+  } catch (e) {
+    console.error('DB connect failed for deduction:', e);
+    return;
+  }
+  const humanPlayers = room.players.filter(p => !p.isBot);
+  for (const hp of humanPlayers) {
+    try {
+      const s = io.sockets.sockets.get(hp.id);
+      const identity = s?.data?.identity || {};
+      const email = identity?.email;
+      if (!email) {
+        console.warn(`⚠️ No identity email for player ${hp.id}; skipping deduction`);
+        continue;
+      }
+      const user = await User.findOne({ email });
+      if (user && (user.tokens || 0) >= 300) {
+        user.tokens = (user.tokens || 0) - 300;
+        await user.save();
+        console.log(`💳 Deducted 300 tokens from ${email} on game start (${room.id})`);
+      } else {
+        console.warn(`⚠️ Cannot deduct tokens for ${email}: user not found or insufficient tokens`);
+      }
+    } catch (e) {
+      console.error('Token deduction error:', e);
+    }
+  }
+};
+
+// Helper: if it's a bot's turn, auto-play a card (works for bot1v1 and 2v2 with bots)
 const maybeScheduleBotMove = (roomId: string) => {
   const room = gameManager.getRoom(roomId);
-  if (!room || room.gameMode !== 'bot1v1' || !room.gameState) return;
-  const bot = room.players.find(p => p.isBot);
-  if (!bot) return;
+  if (!room || !room.gameState) return;
   if (room.gameState.gameEnded) return;
-  if (room.gameState.currentPlayer !== bot.id) return;
+  if (room.gameState.phase !== 'playing') return;
+  // find the bot whose turn it is
+  const bot = room.players.find(p => p.isBot && p.id === room.gameState!.currentPlayer);
+  if (!bot) return;
 
   // Phase 1: after a short delay, emit a preview state showing the bot's card on table
+  console.log(`🤖 Scheduling bot move in room ${roomId} for ${bot.name} (${bot.id}), mode=${room.gameMode}`);
   setTimeout(() => {
-    const currentRoom = gameManager.getRoom(roomId);
-    if (!currentRoom || !currentRoom.gameState) return;
-    if (currentRoom.gameState.currentPlayer !== bot.id) return;
+  const currentRoom = gameManager.getRoom(roomId);
+  if (!currentRoom || !currentRoom.gameState) return;
+  if (currentRoom.gameState.phase !== 'playing') return;
+  if (currentRoom.gameState.currentPlayer !== bot.id) return;
     const botHand = currentRoom.gameState.hands[bot.id] || [];
     if (botHand.length === 0) return;
     const cardToPlay = botHand[0];
+    console.log(`🤖 ${bot.name} (${bot.id}) preview playing ${cardToPlay.rank} of ${cardToPlay.suit}`);
 
     // Emit preview with the card visible on table before resolution
     const previewState = {
@@ -70,6 +124,7 @@ const maybeScheduleBotMove = (roomId: string) => {
     setTimeout(() => {
       const latestRoom = gameManager.getRoom(roomId);
       if (!latestRoom || !latestRoom.gameState) return;
+      if (latestRoom.gameState.phase !== 'playing') return;
       // If state already advanced, skip
       if (latestRoom.gameState.currentPlayer !== bot.id) return;
 
@@ -83,6 +138,7 @@ const maybeScheduleBotMove = (roomId: string) => {
       const result = gameManager.processGameEvent(bot.id, event);
       if (result.success && result.data && result.data.gameState) {
         const updated = result.data;
+        console.log(`🤖 ${bot.name} (${bot.id}) played ${cardToPlay.rank} of ${cardToPlay.suit}; next player: ${updated.gameState!.currentPlayer}`);
         io.to(updated.id).emit('cardPlayed', {
           playerId: bot.id,
           cardId: cardToPlay.id,
@@ -95,45 +151,67 @@ const maybeScheduleBotMove = (roomId: string) => {
         if (roomAfter.gameState?.newRoundStarted) {
           roomAfter.gameState.newRoundStarted = false;
           setTimeout(() => {
-            const r = gameManager.getRoom(roomAfter.id);
-            if (r && r.gameState) {
-              if (r.gameState.gameEnded) {
-                const prizeDistribution = gameManager.distributePrizes(r.id);
-                io.to(r.id).emit('gameEnded', {
-                  gameState: r.gameState,
-                  winner: r.gameState.winner,
-                  prizeDistribution,
-                  message: 'Game finished!'
-                });
-              } else {
-                r.players.forEach((p) => {
-                  const ps = io.sockets.sockets.get(p.id);
-                  if (ps) {
-                    const sanitized = {
-                      ...r,
-                      gameState: {
-                        ...r.gameState!,
-                        hands: {
-                          [p.id]: r.gameState!.hands[p.id] || [],
-                          ...Object.fromEntries(
-                            r.players
-                              .filter(x => x.id !== p.id)
-                              .map(x => [x.id, (r.gameState!.hands[x.id] || []).length])
-                          )
+            (async () => {
+              const r = gameManager.getRoom(roomAfter.id);
+              if (r && r.gameState) {
+                if (r.gameState.gameEnded) {
+                  const prizeDistribution = gameManager.distributePrizes(r.id);
+                  // Update user stats: gamesPlayed, wins, losses
+                  await ensureDb();
+                  const winningTeam = r.gameState.winner;
+                  for (const player of r.players) {
+                    const ps = io.sockets.sockets.get(player.id);
+                    const identity = ps?.data?.identity || {};
+                    const email = identity?.email;
+                    if (!player.isBot && email) {
+                      const user = await User.findOne({ email });
+                      if (user) {
+                        user.gamesPlayed = (user.gamesPlayed || 0) + 1;
+                        if (player.team === winningTeam) {
+                          user.wins = (user.wins || 0) + 1;
+                        } else {
+                          user.losses = (user.losses || 0) + 1;
                         }
+                        await user.save();
                       }
-                    } as any;
-                    ps.emit('newRound', {
-                      room: sanitized,
-                      gameState: sanitized.gameState,
-                      message: 'New round started!',
-                      scores: r.gameState!.scores
-                    });
+                    }
                   }
-                });
-                maybeScheduleBotMove(r.id);
+                  io.to(r.id).emit('gameEnded', {
+                    gameState: r.gameState,
+                    winner: r.gameState.winner,
+                    prizeDistribution,
+                    message: 'Game finished!'
+                  });
+                } else {
+                  r.players.forEach((p) => {
+                    const ps = io.sockets.sockets.get(p.id);
+                    if (ps) {
+                      const sanitized = {
+                        ...r,
+                        gameState: {
+                          ...r.gameState!,
+                          hands: {
+                            [p.id]: r.gameState!.hands[p.id] || [],
+                            ...Object.fromEntries(
+                              r.players
+                                .filter(x => x.id !== p.id)
+                                .map(x => [x.id, (r.gameState!.hands[x.id] || []).length])
+                            )
+                          }
+                        }
+                      } as any;
+                      ps.emit('newRound', {
+                        room: sanitized,
+                        gameState: sanitized.gameState,
+                        message: 'New round started!',
+                        scores: r.gameState!.scores
+                      });
+                    }
+                  });
+                  maybeScheduleBotMove(r.id);
+                }
               }
-            }
+            })();
           }, 200);
         } else {
           maybeScheduleBotMove(updated.id);
@@ -141,6 +219,46 @@ const maybeScheduleBotMove = (roomId: string) => {
       }
     }, 1200);
   }, 200);
+};
+
+// In 2v2, if a bot is asked to respond to TRUT, schedule an auto response
+const maybeScheduleBotChallengeResponse2v2 = (roomId: string) => {
+  const room = gameManager.getRoom(roomId);
+  if (!room || room.gameMode !== '2v2' || !room.gameState) return;
+  const gs = room.gameState;
+  if (!gs.awaitingChallengeResponse || !gs.challengeRespondent) return;
+  const bot = room.players.find(p => p.isBot && p.id === gs.challengeRespondent);
+  if (!bot) return;
+
+  const humanOpponent = room.players.find(p => !p.isBot && p.team !== (bot.team || 'team1'));
+  const shouldAccept = humanOpponent
+    ? botStrategy.shouldAcceptChallenge(gs, bot, humanOpponent, bot.botProfile?.difficulty || 'normal')
+    : Math.random() < 0.5;
+
+  setTimeout(() => {
+    const latest = gameManager.getRoom(roomId);
+    if (!latest || !latest.gameState) return;
+    if (!latest.gameState.awaitingChallengeResponse || latest.gameState.challengeRespondent !== bot.id) return;
+
+    const botEvent: GameEvent = { type: 'challenge_response', playerId: bot.id, data: { accept: shouldAccept }, timestamp: new Date() } as any;
+    const res = gameManager.processGameEvent(bot.id, botEvent);
+    if (res.success && res.data) {
+      io.to(roomId).emit('challengeResponse', {
+        playerId: bot.id,
+        accept: shouldAccept,
+        gameState: res.data.gameState,
+        message: shouldAccept ? `${bot.name} accepted the challenge!` : `${bot.name} folded.`
+      });
+
+      // If still awaiting another response and it's another bot, schedule again; else resume bot moves
+      const after = gameManager.getRoom(roomId);
+      if (after?.gameState?.awaitingChallengeResponse) {
+        maybeScheduleBotChallengeResponse2v2(roomId);
+      } else {
+        maybeScheduleBotMove(roomId);
+      }
+    }
+  }, 1200);
 };
 
 app.get('/health', (req, res) => {
@@ -154,6 +272,10 @@ app.get('/health', (req, res) => {
 
 io.on('connection', (socket) => {
   console.log(`Player connected: ${socket.id}`);
+
+  // Capture identity from client auth payload (populated by NextAuth session on client)
+  const { userId, email, username, name } = (socket.handshake.auth || {}) as any;
+  (socket.data as any).identity = { userId, email, username, name };
 
   socket.on('startMatchmaking', (data) => {
     const { gameMode, playerName, betAmount, teamMode, teamMateId, botConfig } = data || {};
@@ -211,16 +333,15 @@ io.on('connection', (socket) => {
             message: `${gm === '2v2' ? '2v2' : 'Bot 1v1'} match found! Get ready to play!`
           });
 
-          setTimeout(() => {
+          setTimeout(async () => {
             console.log(`(Immediate) Starting game in room ${room.id}`);
             const startResult = gameManager.startGame(room.id);
             if (startResult.success) {
               const startedRoom = gameManager.getRoom(room.id)!;
               console.log(`(Immediate) Game started successfully in room ${room.id}, sending to ${startedRoom.players.length} players`);
-              // If bot1v1, schedule bot move when it's bot's turn
-              if (startedRoom.gameMode === 'bot1v1') {
-                maybeScheduleBotMove(startedRoom.id);
-              }
+              await deductTokensForRoom(startedRoom);
+              // Schedule bot move if it's a bot's turn (any mode)
+              maybeScheduleBotMove(startedRoom.id);
               startedRoom.players.forEach((p) => {
                 const ps = io.sockets.sockets.get(p.id);
                 if (ps && startedRoom.gameState) {
@@ -317,13 +438,17 @@ io.on('connection', (socket) => {
     if (removed) socket.emit('matchmakingCancelled', { message: 'Matchmaking cancelled' });
   });
 
-  socket.on('setReady', (isReady: boolean) => {
+  socket.on('setReady', async (isReady: boolean) => {
     const result = gameManager.setPlayerReady(socket.id, isReady);
     if (result.success && result.data) {
       io.to(result.data.id).emit('playerReadyChange', { playerId: socket.id, isReady, room: result.data });
       if (result.data.players.every(p => p.isReady)) {
         const sr = gameManager.startGame(result.data.id);
-        if (sr.success) io.to(result.data.id).emit('gameStart', { room: result.data, message: 'Game started! Good luck!' });
+        if (sr.success) {
+          const startedRoom = gameManager.getRoom(result.data.id)!;
+          await deductTokensForRoom(startedRoom);
+          io.to(result.data.id).emit('gameStart', { room: result.data, message: 'Game started! Good luck!' });
+        }
       }
     } else {
       socket.emit('error', { message: result.error || 'Failed to update ready status' });
@@ -346,9 +471,9 @@ io.on('connection', (socket) => {
         nextPlayer: result.data.gameState?.currentPlayer
       });
 
-      // If bot game and it's now bot's turn, schedule bot move
+      // If it's now a bot's turn (any mode), schedule bot move
       const r = gameManager.getRoom(result.data.id);
-      if (r && r.gameMode === 'bot1v1') {
+      if (r) {
         maybeScheduleBotMove(r.id);
       }
 
@@ -456,6 +581,9 @@ io.on('connection', (socket) => {
             }
           }, 1500); // 1.5 second delay for bot to "think"
         }
+      } else if (room.gameMode === '2v2' && room.gameState?.awaitingChallengeResponse) {
+        // 2v2: if the current respondent is a bot, schedule auto response
+        maybeScheduleBotChallengeResponse2v2(room.id);
       }
     } else {
       socket.emit('error', { message: result.error || 'Failed to call trut' });
@@ -477,6 +605,8 @@ io.on('connection', (socket) => {
           gameState,
           message: 'Challenge accepted! Playing for Long Point!'
         });
+        // Resume play; if it's a bot's turn now, schedule their move
+        maybeScheduleBotMove(room.id);
       } else {
         // Check if this was a 2v2 game and more responses are needed
         if (room.gameMode === '2v2' && gameState.awaitingChallengeResponse) {
@@ -489,6 +619,8 @@ io.on('connection', (socket) => {
             gameState,
             message: `${currentPlayerName} folded. Waiting for ${nextRespondentName} to respond...`
           });
+          // If next respondent is a bot, schedule their response
+          maybeScheduleBotChallengeResponse2v2(room.id);
         } else {
           // All opponents folded or 1v1 fold
           io.to(room.id).emit('challengeResponse', { 
@@ -529,7 +661,7 @@ io.on('connection', (socket) => {
                 }
               });
             }
-          }, 400);
+          }, 1200);
         }
       }
     } else {
@@ -630,15 +762,15 @@ setInterval(() => {
       message: `${gameMode === '2v2' ? '2v2' : 'Bot 1v1'} match found! Get ready to play!`
     });
 
-    setTimeout(() => {
+    setTimeout(async () => {
       console.log(`Starting game in room ${room.id}`);
       const startResult = gameManager.startGame(room.id);
       if (startResult.success) {
         const startedRoom = gameManager.getRoom(room.id)!;
         console.log(`Game started successfully in room ${room.id}, sending to ${startedRoom.players.length} players`);
-        if (startedRoom.gameMode === 'bot1v1') {
-          maybeScheduleBotMove(startedRoom.id);
-        }
+        await deductTokensForRoom(startedRoom);
+        // Schedule bot move if it's a bot's turn (any mode)
+        maybeScheduleBotMove(startedRoom.id);
         startedRoom.players.forEach((p) => {
           const ps = io.sockets.sockets.get(p.id);
           if (ps && startedRoom.gameState) {

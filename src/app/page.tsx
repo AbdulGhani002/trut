@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useMultiplayerStore } from "@/lib/multiplayer/store";
@@ -11,7 +11,23 @@ export default function Home() {
   const router = useRouter();
   const store = useMultiplayerStore();
   const { data: session, status } = useSession();
+  const [tokens, setTokens] = useState<number | null>(null);
   const setPlayerName = useMultiplayerStore((s) => s.setPlayerName);
+
+  useEffect(() => {
+    async function fetchTokens() {
+      if (status === 'authenticated') {
+        try {
+          const res = await fetch('/api/user/stats', { credentials: 'same-origin' });
+          if (res.ok) {
+            const data = await res.json();
+            setTokens(data.tokens);
+          }
+        } catch {}
+      }
+    }
+    fetchTokens();
+  }, [status]);
 
   // Handle session loading and authentication
   useEffect(() => {
@@ -30,15 +46,11 @@ export default function Home() {
     }
   }, [status, store.connect, store.socket]);
 
-  const connected = store.connectionStatus.status === 'connected';
+  // Only one useEffect for fetching tokens
 
   const handle2v2Click = useCallback(() => {
-    if (!connected) {
-      alert('Not connected to server. Please wait...');
-      return;
-    }
     router.push('/game/2v2');
-  }, [connected, router]);
+  }, [router]);
 
   const handleBotClick = useCallback(() => {
     router.push('/game/bot1v1');
@@ -91,7 +103,7 @@ export default function Home() {
         subtitle: "Your performance",
         emoji: "📈",
         gradient: "from-blue-600 to-indigo-600",
-        onClick: () => alert("Statistics coming soon"),
+        onClick: () => router.push('/stats'),
       },
     ],
     [handle2v2Click, handleBotClick, router]
@@ -135,7 +147,7 @@ export default function Home() {
                 Free Tokens
               </button>
               <div className="text-right">
-                <div className="font-bold">{session.user.tokens}</div>
+                <div className="font-bold">{tokens ?? '...'}</div>
                 <div className="text-xs text-white/50">Virtual Tokens</div>
               </div>
             </div>
@@ -146,7 +158,7 @@ export default function Home() {
               <button
                 key={tile.key}
                 onClick={tile.onClick}
-                disabled={!connected && (tile.key === 'multi' || tile.key === 'bot')}
+                disabled={false}
                 className="group text-left glass-panel p-5 hover:-translate-y-0.5 transition transform disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <div className={`h-12 w-12 rounded-xl bg-gradient-to-br ${tile.gradient} grid place-items-center text-xl shadow-lg`}>

@@ -117,7 +117,24 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
   _creditedRooms: new Set<string>(),
 
   connect: async () => {
-    const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'], timeout: 10000 });
+    // Obtain session info to attach identity to the socket handshake for server-side actions (like token deduction)
+    type AuthPayload = {
+      userId?: string;
+      email?: string;
+      username?: string;
+      name?: string;
+    };
+    let authPayload: AuthPayload = {};
+    try {
+      const res = await fetch('/api/auth/session', { credentials: 'same-origin' });
+      if (res.ok) {
+        const session = await res.json();
+        const u = session?.user || {};
+        authPayload = { userId: u.id, email: u.email, username: u.username, name: u.name };
+      }
+    } catch {}
+
+    const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'], timeout: 10000, auth: authPayload });
 
     socket.on('connect', () => {
       set({ connectionStatus: { ...initialConnectionStatus, status: 'connected', lastConnected: new Date(), ping: 50 } });
@@ -170,18 +187,9 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
           : null,
       });
 
-      // Deduct bet tokens once when a 2v2 game starts
+      // Server-authoritative deduction now; just log receipt
       const room = data.room || get().currentRoom;
-      try {
-        if (room?.gameMode === '2v2' && room.betAmount && !get()._deductedRooms.has(room.id)) {
-          get()._deductedRooms.add(room.id);
-          fetch('/api/tokens/deduct', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ amount: 300 }),
-          }).catch(() => {});
-        }
-      } catch {}
+      try { console.log('gameStart received:', { roomId: room?.id, mode: room?.gameMode, betAmount: room?.betAmount }); } catch {}
     });
     socket.on('cardPlayed', (data: SocketEventData['cardPlayed']) => {
       // Use server state as single source of truth - no optimistic updates
@@ -231,9 +239,21 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ amount }),
+              credentials: 'same-origin',
             }).catch(() => {});
           }
         }
+      } catch {}
+
+      // Auto-leave the room a few seconds after game end to return players to lobby
+      try {
+        setTimeout(() => {
+          const success = get().leaveGame();
+          if (!success) {
+            // Fallback: clear local state when socket isn’t connected
+            set({ currentRoom: null, gameState: null, chatMessages: [], unreadMessageCount: 0, matchmakingStatus: 'idle', estimatedWaitTime: null });
+          }
+        }, 5000); // 5 seconds grace to view results
       } catch {}
     });
     socket.on('leftRoom', () => {
