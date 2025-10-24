@@ -6,6 +6,7 @@ First, run the development server:
 
 ```bash
 npm run dev
+stripe listen --forward-to localhost:3001/api/stripe/webhook
 # or
 yarn dev
 # or

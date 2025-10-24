@@ -1,6 +1,6 @@
 "use client";
 import { Suspense, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 
 function QueryBanners() {
   const params = useSearchParams();
@@ -18,6 +18,7 @@ function QueryBanners() {
 
 export default function ShopPage() {
   const [loading, setLoading] = useState(false);
+  const router = useRouter();
 
   const handleBuy = async () => {
     setLoading(true);
@@ -32,6 +33,12 @@ export default function ShopPage() {
 
   return (
     <div className="max-w-xl mx-auto p-6">
+      <button
+        className="mb-4 px-4 py-2 rounded bg-red-600 hover:bg-red-500 text-white font-semibold shadow-lg"
+        onClick={() => router.push('/')}
+      >
+        ← Back
+      </button>
       <h1 className="text-3xl font-bold mb-4">Shop</h1>
       <Suspense fallback={null}>
         <QueryBanners />
