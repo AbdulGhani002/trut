@@ -43,38 +43,79 @@ const deductedRoomsGlobal = (global as any);
 deductedRoomsGlobal.__deductedRooms = deductedRoomsGlobal.__deductedRooms || new Set<string>();
 const deductedRooms: Set<string> = deductedRoomsGlobal.__deductedRooms;
 
-const deductTokensForRoom = async (room: GameRoom) => {
-  if (room.gameMode !== '2v2') return;
-  if (deductedRooms.has(room.id)) return;
+const deductTokensForRoom = async (room: GameRoom): Promise<boolean> => {
+  // Only apply to 2v2 paid rooms
+  if (room.gameMode !== '2v2') return true;
+  if (deductedRooms.has(room.id)) return true;
+  // Mark early to avoid re-entrancy
   deductedRooms.add(room.id);
   try {
     await ensureDb();
   } catch (e) {
     console.error('DB connect failed for deduction:', e);
-    return;
+    return false;
   }
+
+  const amount = room.betAmount || 300;
   const humanPlayers = room.players.filter(p => !p.isBot);
+
+  // Verify all human players have enough tokens and identities
+  const insufficient: { playerId: string; email?: string }[] = [];
   for (const hp of humanPlayers) {
     try {
       const s = io.sockets.sockets.get(hp.id);
       const identity = s?.data?.identity || {};
       const email = identity?.email;
       if (!email) {
-        console.warn(`⚠️ No identity email for player ${hp.id}; skipping deduction`);
+        insufficient.push({ playerId: hp.id, email: undefined });
         continue;
       }
       const user = await User.findOne({ email });
-      if (user && (user.tokens || 0) >= 300) {
-        user.tokens = (user.tokens || 0) - 300;
-        await user.save();
-        console.log(`💳 Deducted 300 tokens from ${email} on game start (${room.id})`);
-      } else {
-        console.warn(`⚠️ Cannot deduct tokens for ${email}: user not found or insufficient tokens`);
+      if (!user || (user.tokens || 0) < amount) {
+        insufficient.push({ playerId: hp.id, email });
       }
     } catch (e) {
-      console.error('Token deduction error:', e);
+      console.error('Token deduction verification error:', e);
+      insufficient.push({ playerId: hp.id });
     }
   }
+
+  if (insufficient.length > 0) {
+    // Notify affected players and abort start
+    insufficient.forEach((i) => {
+      const sock = io.sockets.sockets.get(i.playerId);
+      if (sock) {
+        sock.emit('matchmakingRejected', { reason: i.email ? 'insufficient_tokens' : 'not_authenticated', amount });
+      }
+    });
+    console.warn(`Aborting game ${room.id} start: ${insufficient.length} players lacking funds/identity`);
+    return false;
+  }
+
+  // Deduct tokens now that everyone has funds
+  for (const hp of humanPlayers) {
+    try {
+      const s = io.sockets.sockets.get(hp.id);
+      const identity = s?.data?.identity || {};
+      const email = identity?.email;
+      if (!email) {
+        // Shouldn't happen due to verification above
+        continue;
+      }
+      const user = await User.findOne({ email });
+      if (user) {
+        user.tokens = (user.tokens || 0) - amount;
+        await user.save();
+        console.log(`💳 Deducted ${amount} tokens from ${email} for game start (${room.id})`);
+      }
+    } catch (e) {
+      console.error('Token deduction error during apply:', e);
+      // On error, abort (note: partial deductions may have occurred)
+      return false;
+    }
+  }
+
+  return true;
 };
 
 // Helper: if it's a bot's turn, auto-play a card (works for bot1v1 and 2v2 with bots)
@@ -156,7 +197,7 @@ const maybeScheduleBotMove = (roomId: string) => {
               if (r && r.gameState) {
                 if (r.gameState.gameEnded) {
                   const prizeDistribution = gameManager.distributePrizes(r.id);
-                  // Update user stats: gamesPlayed, wins, losses
+                  // Update user stats: gamesPlayed, wins, losses and credit prize tokens
                   await ensureDb();
                   const winningTeam = r.gameState.winner;
                   for (const player of r.players) {
@@ -171,6 +212,12 @@ const maybeScheduleBotMove = (roomId: string) => {
                           user.wins = (user.wins || 0) + 1;
                         } else {
                           user.losses = (user.losses || 0) + 1;
+                        }
+                        // Credit prize if applicable
+                        const credit = prizeDistribution[player.id] || 0;
+                        if (credit > 0) {
+                          user.tokens = (user.tokens || 0) + credit;
+                          console.log(`💰 Credited ${credit} tokens to ${email} for game ${r.id}`);
                         }
                         await user.save();
                       }
@@ -277,7 +324,7 @@ io.on('connection', (socket) => {
   const { userId, email, username, name } = (socket.handshake.auth || {}) as any;
   (socket.data as any).identity = { userId, email, username, name };
 
-  socket.on('startMatchmaking', (data) => {
+  socket.on('startMatchmaking', async (data) => {
     const { gameMode, playerName, betAmount, teamMode, teamMateId, botConfig } = data || {};
     const playerId = socket.id;
 
@@ -285,6 +332,43 @@ io.on('connection', (socket) => {
 
     // Add to queue with 2v2 support
     try {
+      // If joining 2v2 ensure the player is authenticated and has enough tokens to cover the bet (default 300)
+      if (gameMode === '2v2') {
+        const amountRequired = betAmount || 300;
+
+        // If no DB configured, allow queueing for local/dev so bots can fill in later.
+        if (!process.env.MONGODB_URI) {
+          console.warn('MONGODB_URI not set — skipping token verification for 2v2 (dev mode).');
+        } else {
+          try {
+            await ensureDb();
+          } catch (e) {
+            console.error('DB connect failed while verifying tokens for 2v2:', e);
+            socket.emit('matchmakingRejected', { reason: 'db_unavailable' });
+            return;
+          }
+
+          const identity = (socket.data as any).identity || {};
+          const email = identity.email;
+          if (!email) {
+            socket.emit('matchmakingRejected', { reason: 'not_authenticated' });
+            return;
+          }
+
+          try {
+            const user = await User.findOne({ email });
+            if (!user || (user.tokens || 0) < amountRequired) {
+              socket.emit('matchmakingRejected', { reason: 'insufficient_tokens', amount: amountRequired });
+              return;
+            }
+          } catch (e) {
+            console.error('Error while checking user tokens for 2v2 matchmaking:', e);
+            socket.emit('matchmakingRejected', { reason: 'db_error' });
+            return;
+          }
+        }
+      }
+
       gameManager.addToMatchmakingQueue(
         playerId,
         gameMode || 'bot1v1',
@@ -339,36 +423,50 @@ io.on('connection', (socket) => {
             if (startResult.success) {
               const startedRoom = gameManager.getRoom(room.id)!;
               console.log(`(Immediate) Game started successfully in room ${room.id}, sending to ${startedRoom.players.length} players`);
-              await deductTokensForRoom(startedRoom);
-              // Schedule bot move if it's a bot's turn (any mode)
-              maybeScheduleBotMove(startedRoom.id);
-              startedRoom.players.forEach((p) => {
-                const ps = io.sockets.sockets.get(p.id);
-                if (ps && startedRoom.gameState) {
-                  const sanitized = {
-                    ...startedRoom,
-                    gameState: {
-                      ...startedRoom.gameState,
-                      hands: {
-                        [p.id]: startedRoom.gameState.hands[p.id],
-                        ...Object.fromEntries(
-                          startedRoom.players
-                            .filter(x => x.id !== p.id)
-                            .map(x => [x.id, startedRoom.gameState!.hands[x.id].length])
-                        )
+              const ok = await deductTokensForRoom(startedRoom);
+
+              if (!ok) {
+                console.log(`(Immediate) Aborting gameStart for room ${startedRoom.id} due to token deduction failure`);
+                // Notify all players in this room that the match was cancelled
+                startedRoom.players.forEach((p) => {
+                  const ps = io.sockets.sockets.get(p.id);
+                  if (ps) {
+                    ps.leave(startedRoom.id);
+                    ps.emit('matchmakingRejected', { reason: 'insufficient_tokens_or_auth' });
+                  }
+                });
+              } else {
+                // Schedule bot move if it's a bot's turn (any mode)
+                maybeScheduleBotMove(startedRoom.id);
+
+                startedRoom.players.forEach((p) => {
+                  const ps = io.sockets.sockets.get(p.id);
+                  if (ps && startedRoom.gameState) {
+                    const sanitized = {
+                      ...startedRoom,
+                      gameState: {
+                        ...startedRoom.gameState,
+                        hands: {
+                          [p.id]: startedRoom.gameState.hands[p.id],
+                          ...Object.fromEntries(
+                            startedRoom.players
+                              .filter(x => x.id !== p.id)
+                              .map(x => [x.id, startedRoom.gameState!.hands[x.id].length])
+                          )
+                        }
                       }
-                    }
-                  } as any;
-                  ps.emit('gameStart', {
-                    room: sanitized,
-                    gameState: sanitized.gameState,
-                    message: 'Game started! Good luck!'
-                  });
-                  console.log(`(Immediate) Sent gameStart to player ${p.name} (${p.id})`);
-                } else {
-                  console.log(`(Immediate) Warning: Could not send gameStart to player ${p.id} (socket: ${!!ps}, gameState: ${!!startedRoom.gameState})`);
-                }
-              });
+                    } as any;
+                    ps.emit('gameStart', {
+                      room: sanitized,
+                      gameState: sanitized.gameState,
+                      message: 'Game started! Good luck!'
+                    });
+                    console.log(`(Immediate) Sent gameStart to player ${p.name} (${p.id})`);
+                  } else {
+                    console.log(`(Immediate) Warning: Could not send gameStart to player ${p.id} (socket: ${!!ps}, gameState: ${!!startedRoom.gameState})`);
+                  }
+                });
+              }
             } else {
               console.log(`(Immediate) Failed to start game in room ${room.id}: ${startResult.error}`);
             }
@@ -396,35 +494,53 @@ io.on('connection', (socket) => {
             message: 'Bot match found! Game starting soon...'
           });
 
-          setTimeout(() => {
+          setTimeout(async () => {
             const startResult = gameManager.startGame(room.id);
             if (startResult.success) {
               const startedRoom = gameManager.getRoom(room.id)!;
-              maybeScheduleBotMove(startedRoom.id);
-              startedRoom.players.forEach((p) => {
-                const ps = io.sockets.sockets.get(p.id);
-                if (ps && startedRoom.gameState) {
-                  const sanitized = {
-                    ...startedRoom,
-                    gameState: {
-                      ...startedRoom.gameState,
-                      hands: {
-                        [p.id]: startedRoom.gameState.hands[p.id],
-                        ...Object.fromEntries(
-                          startedRoom.players
-                            .filter(x => x.id !== p.id)
-                            .map(x => [x.id, startedRoom.gameState!.hands[x.id].length])
-                        )
+              const ok2 = await deductTokensForRoom(startedRoom);
+
+              if (!ok2) {
+                console.log(`Failed to deduct tokens for room ${room.id} on setReady flow; cancelling start`);
+                startedRoom.players.forEach((p) => {
+                  const ps = io.sockets.sockets.get(p.id);
+                  if (ps) {
+                    ps.leave(startedRoom.id);
+                    ps.emit('matchmakingRejected', { reason: 'insufficient_tokens_or_auth' });
+                  }
+                });
+              } else {
+                maybeScheduleBotMove(startedRoom.id);
+
+                startedRoom.players.forEach((p) => {
+                  const ps = io.sockets.sockets.get(p.id);
+                  if (ps && startedRoom.gameState) {
+                    const sanitized = {
+                      ...startedRoom,
+                      gameState: {
+                        ...startedRoom.gameState,
+                        hands: {
+                          [p.id]: startedRoom.gameState.hands[p.id],
+                          ...Object.fromEntries(
+                            startedRoom.players
+                              .filter(x => x.id !== p.id)
+                              .map(x => [x.id, startedRoom.gameState!.hands[x.id].length])
+                          )
+                        }
                       }
-                    }
-                  } as any;
-                  ps.emit('gameStart', {
-                    room: sanitized,
-                    gameState: sanitized.gameState,
-                    message: 'Game started! Good luck!'
-                  });
-                }
-              });
+                    } as any;
+                    ps.emit('gameStart', {
+                      room: sanitized,
+                      gameState: sanitized.gameState,
+                      message: 'Game started! Good luck!'
+                    });
+                  } else {
+                    console.log(`Warning: Could not send gameStart to player ${p.id} (socket: ${!!ps}, gameState: ${!!startedRoom.gameState})`);
+                  }
+                });
+              }
+            } else {
+              console.log(`Failed to start game in room ${room.id}: ${startResult.error}`);
             }
           }, 1000);
         }
@@ -446,8 +562,19 @@ io.on('connection', (socket) => {
         const sr = gameManager.startGame(result.data.id);
         if (sr.success) {
           const startedRoom = gameManager.getRoom(result.data.id)!;
-          await deductTokensForRoom(startedRoom);
-          io.to(result.data.id).emit('gameStart', { room: result.data, message: 'Game started! Good luck!' });
+          const ok = await deductTokensForRoom(startedRoom);
+          if (!ok) {
+            console.log(`Aborting start for room ${startedRoom.id} due to token deduction failure (setReady flow)`);
+            startedRoom.players.forEach((p) => {
+              const ps = io.sockets.sockets.get(p.id);
+              if (ps) {
+                ps.leave(startedRoom.id);
+                ps.emit('matchmakingRejected', { reason: 'insufficient_tokens_or_auth' });
+              }
+            });
+          } else {
+            io.to(result.data.id).emit('gameStart', { room: result.data, message: 'Game started! Good luck!' });
+          }
         }
       }
     } else {
@@ -483,12 +610,33 @@ io.on('connection', (socket) => {
         // Clear the flag
         room.gameState.newRoundStarted = false;
         
-        setTimeout(() => {
+  setTimeout(async () => {
           const updatedRoom = gameManager.getRoom(room.id);
-          if (updatedRoom && updatedRoom.gameState) {
+            if (updatedRoom && updatedRoom.gameState) {
             if (updatedRoom.gameState.gameEnded) {
               // Game finished
               const prizeDistribution = gameManager.distributePrizes(room.id);
+              // Credit prizes to human players (if any)
+              try {
+                await ensureDb();
+                for (const [playerId, amount] of Object.entries(prizeDistribution)) {
+                  if (!amount || amount <= 0) continue;
+                  const ps = io.sockets.sockets.get(playerId);
+                  const identity = ps?.data?.identity || {};
+                  const email = identity?.email;
+                  if (email) {
+                    const user = await User.findOne({ email });
+                    if (user) {
+                      user.tokens = (user.tokens || 0) + amount;
+                      await user.save();
+                      console.log(`💰 Credited ${amount} tokens to ${email} for room ${room.id}`);
+                    }
+                  }
+                }
+              } catch (e) {
+                console.error('Error crediting prize distribution:', e);
+              }
+
               io.to(room.id).emit('gameEnded', {
                 gameState: updatedRoom.gameState,
                 winner: updatedRoom.gameState.winner,

@@ -56,6 +56,10 @@ export default function Home() {
     router.push('/game/bot1v1');
   }, [router]);
 
+  const handleTournamentClick = useCallback(() => {
+    router.push('/tournaments');
+  }, [router]);
+
   const handleLogout = useCallback(async () => {
     if (confirm('Are you sure you want to logout?')) {
       store.disconnect();
@@ -74,13 +78,26 @@ export default function Home() {
         onClick: handleBotClick,
       },
       {
-        key: "multi",
-        title: "2v2 Realtime",
-        subtitle: "Play with friends • 300 tokens",
-        emoji: "👥",
-        gradient: "from-emerald-600 to-green-600",
+        key: "2v2",
+        title: "2v2 Match",
+        subtitle: "Team up • Quick match",
+        emoji: "🤝",
+        gradient: "from-green-600 to-emerald-500",
         onClick: handle2v2Click,
       },
+      {
+        key: "tournament",
+        title: "Tournament Mode",
+        subtitle: "Classic 16-player • 200 tokens",
+        emoji: (
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-6 h-6">
+            <path d="M12 2c.55 0 1 .45 1 1v1h2.5A2.5 2.5 0 0 1 18 6.5V8c0 1.66-1.34 3-3 3H9c-1.66 0-3-1.34-3-3V6.5A2.5 2.5 0 0 1 8.5 4H11V3c0-.55.45-1 1-1z" fill="#F59E0B" />
+            <path d="M7 10v2a5 5 0 0 0 5 5v5h2v-5a5 5 0 0 0 5-5v-2H7z" fill="#D97706" />
+          </svg>
+        ),
+        gradient: "from-yellow-600 to-amber-500",
+        onClick: handleTournamentClick,
+  },
       {
         key: "tutorial",
         title: "Tutorial",
@@ -106,7 +123,7 @@ export default function Home() {
         onClick: () => router.push('/stats'),
       },
     ],
-    [handle2v2Click, handleBotClick, router]
+    [handle2v2Click, handleBotClick, handleTournamentClick, router]
   );
   
   const inGame = useMemo(() => store.currentRoom || store.gameState, [store.currentRoom, store.gameState]);

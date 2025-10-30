@@ -134,6 +134,23 @@ export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
       }
     } catch {}
 
+
+  type SocketWithAuth = Socket & { auth?: { email?: string; userId?: string } };
+  const existing = get().socket as SocketWithAuth | null;
+    if (existing) {
+      try {
+        const existingAuth = existing.auth || {};
+        const sameAuth = existingAuth.email === authPayload.email && existingAuth.userId === authPayload.userId;
+        if (!sameAuth) {
+          try { existing.disconnect(); } catch {};
+        } else {
+          // Already connected with correct auth
+          set({ socket: existing });
+          return;
+        }
+      } catch {}
+    }
+
     const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'], timeout: 10000, auth: authPayload });
 
     socket.on('connect', () => {
