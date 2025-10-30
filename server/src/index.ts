@@ -8,6 +8,29 @@ import { GameEvent, GameRoom } from '../../shared/types/game';
 import mongoose from 'mongoose';
 import User from '../../shared/models/User';
 import { BotStrategy } from './game/modes/bot1v1/BotStrategy';
+import dotenv from 'dotenv';
+import path from 'path';
+
+// Load .env.local first (Next.js convention), then fall back to .env
+// This makes sure server-side processes (deduction, stats updates) can read MONGODB_URI
+try {
+  const envLocalPath = path.resolve(process.cwd(), '.env.local');
+  dotenv.config({ path: envLocalPath });
+} catch (e) {
+  // ignore
+}
+// Also load .env as a fallback
+dotenv.config();
+
+// Startup info: do NOT print the URI value, just whether it's present
+if (process.env.MONGODB_URI) {
+  console.log('Startup: MONGODB_URI found in environment');
+} else if (process.env.MONGO_URI) {
+  console.log('Startup: MONGO_URI found in environment (will be used as fallback)');
+  process.env.MONGODB_URI = process.env.MONGO_URI;
+} else {
+  console.log('Startup: No MONGODB_URI or MONGO_URI found in environment');
+}
 
 const app = express();
 const httpServer = createServer(app);
@@ -33,6 +56,10 @@ const botStrategy = new BotStrategy();
 const ensureDb = async () => {
   const ready = mongoose.connection.readyState; // 0=disconnected,1=connected,2=connecting
   if (ready !== 1 && ready !== 2) {
+    // allow alternate env var name or values loaded via dotenv
+    if (!process.env.MONGODB_URI && process.env.MONGO_URI) {
+      process.env.MONGODB_URI = process.env.MONGO_URI;
+    }
     if (!process.env.MONGODB_URI) throw new Error('MONGODB_URI is not set');
     await mongoose.connect(process.env.MONGODB_URI);
   }
@@ -83,6 +110,13 @@ const maybeScheduleBotMove = (roomId: string) => {
   if (!room || !room.gameState) return;
   if (room.gameState.gameEnded) return;
   if (room.gameState.phase !== 'playing') return;
+  // If this is a 2v2 game and a bot move is being scheduled, ensure tokens are deducted
+  // once per room. deductTokensForRoom is idempotent per-room via the deductedRooms set.
+  if (room.gameMode === '2v2') {
+    deductTokensForRoom(room).catch((e) => {
+      console.error('Error deducting tokens on bot schedule:', e);
+    });
+  }
   // find the bot whose turn it is
   const bot = room.players.find(p => p.isBot && p.id === room.gameState!.currentPlayer);
   if (!bot) return;

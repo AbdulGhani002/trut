@@ -5,7 +5,9 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 First, run the development server:
 
 ```bash
-npm run dev
+npm run build
+npm start
+npm run dev:server
 stripe listen --forward-to localhost:3001/api/stripe/webhook
 # or
 yarn dev
