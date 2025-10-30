@@ -916,7 +916,19 @@ setInterval(() => {
       if (startResult.success) {
         const startedRoom = gameManager.getRoom(room.id)!;
         console.log(`Game started successfully in room ${room.id}, sending to ${startedRoom.players.length} players`);
-        await deductTokensForRoom(startedRoom);
+        const ok = await deductTokensForRoom(startedRoom);
+        if (!ok) {
+          console.log(`Aborting gameStart for room ${startedRoom.id} due to token deduction failure (periodic flow)`);
+          // Notify all players in this room that the match was cancelled
+          startedRoom.players.forEach((p) => {
+            const ps = io.sockets.sockets.get(p.id);
+            if (ps) {
+              ps.leave(startedRoom.id);
+              ps.emit('matchmakingRejected', { reason: 'insufficient_tokens_or_auth' });
+            }
+          });
+          return; // skip further processing for this match
+        }
         // Schedule bot move if it's a bot's turn (any mode)
         maybeScheduleBotMove(startedRoom.id);
         startedRoom.players.forEach((p) => {
